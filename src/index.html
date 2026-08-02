@@ -1,13 +1,35 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="el" class="h-full bg-slate-900">
 <head>
   <meta charset="utf-8">
-  <title>NgMaranthEstiasi</title>
+  <title>MARANTH ESTIASI POS</title>
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'table-available': '#10b981',
+            'table-occupied': '#ef4444',
+            'table-billed': '#f59e0b',
+            'table-reserved': '#3b82f6',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
 </head>
-<body>
+<body class="h-full bg-slate-900 text-slate-100 font-sans antialiased select-none overflow-x-hidden">
   <app-root></app-root>
 </body>
 </html>

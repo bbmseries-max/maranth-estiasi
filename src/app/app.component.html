@@ -1,0 +1,68 @@
+<div class="min-h-screen w-full bg-slate-900 text-slate-100 flex flex-col font-sans select-none overflow-x-hidden">
+  
+  @if (posService.currentEmployee(); as emp) {
+    <header class="h-16 bg-slate-800 border-b border-slate-700/80 px-4 flex items-center justify-between shadow-lg sticky top-0 z-50">
+      
+      <div class="flex items-center gap-3">
+        <a routerLink="/floor-plan" class="flex items-center gap-2.5 no-underline">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-400 flex items-center justify-center text-xl shadow-md">
+            ☕
+          </div>
+          <div class="hidden sm:flex flex-col">
+            <span class="font-black text-sm tracking-tight text-white leading-none">MARANTH</span>
+            <span class="text-[9px] font-bold text-amber-400 tracking-widest uppercase mt-0.5">ESTIASI POS</span>
+          </div>
+        </a>
+      </div>
+
+      <nav class="flex items-center gap-1 sm:gap-2">
+        <a routerLink="/floor-plan" 
+           routerLinkActive="bg-amber-500/20 text-amber-400 border-amber-500/40"
+           class="px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all border border-transparent flex items-center gap-1.5 no-underline">
+          <span>🪑</span>
+          <span class="hidden md:inline">Τραπέζια</span>
+        </a>
+
+        <a routerLink="/kitchen" 
+           routerLinkActive="bg-amber-500/20 text-amber-400 border-amber-500/40"
+           class="px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all border border-transparent flex items-center gap-1.5 no-underline">
+          <span>🍳</span>
+          <span class="hidden md:inline">Κουζίνα</span>
+        </a>
+
+        <a routerLink="/inventory" 
+           routerLinkActive="bg-amber-500/20 text-amber-400 border-amber-500/40"
+           class="px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all border border-transparent flex items-center gap-1.5 no-underline">
+          <span>📦</span>
+          <span class="hidden md:inline">Αποθήκη</span>
+        </a>
+
+        <a routerLink="/reports" 
+           routerLinkActive="bg-amber-500/20 text-amber-400 border-amber-500/40"
+           class="px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all border border-transparent flex items-center gap-1.5 no-underline">
+          <span>📊</span>
+          <span class="hidden md:inline">Z-Report</span>
+        </a>
+      </nav>
+
+      <div class="flex items-center gap-3">
+        <div class="hidden lg:flex flex-col items-end">
+          <span class="text-xs font-bold text-white">{{ emp.name }}</span>
+          <span class="text-[10px] text-emerald-400 font-medium">● Βάρδια σε ισχύ</span>
+        </div>
+
+        <button (click)="posService.logoutEmployee()" 
+                class="p-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all active:scale-95 flex items-center justify-center"
+                title="Έξοδος">
+          🚪
+        </button>
+      </div>
+
+    </header>
+  }
+
+  <main class="flex-1 w-full flex flex-col">
+    <router-outlet></router-outlet>
+  </main>
+
+</div>
