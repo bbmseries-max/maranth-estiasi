@@ -1,0 +1,194 @@
+<div class="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-6 font-sans select-none">
+  
+  <!-- HEADER -->
+  <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-6 gap-3 shadow-lg">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center text-xl font-black">
+        👥
+      </div>
+      <div>
+        <h1 class="text-xl font-black text-white m-0 tracking-tight">ΔΙΑΧΕΙΡΙΣΗ ΠΡΟΣΩΠΙΚΟΥ</h1>
+        <p class="text-xs text-slate-400 font-medium m-0">
+          Σύνολο Υπαλλήλων: {{ posService.employees().length }}
+        </p>
+      </div>
+    </div>
+
+    <button (click)="openAddModal()"
+            class="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5">
+      <span>➕</span>
+      <span>Νέος Υπάλληλος</span>
+    </button>
+  </div>
+
+  <!-- MAIN LAYOUT -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    
+    <!-- STAFF LIST -->
+    <div class="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+      @for (emp of posService.employees(); track emp.id) {
+        <div (click)="selectEmployee(emp)"
+             [class]="selectedEmployee()?.id === emp.id ? 'border-amber-500 bg-slate-900/90 shadow-amber-500/10' : 'border-slate-800 bg-slate-900 hover:border-slate-700'"
+             class="border-2 rounded-2xl p-4 flex flex-col justify-between gap-3 shadow-lg cursor-pointer transition-all relative overflow-hidden">
+          
+          <div class="flex justify-between items-start">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-lg font-bold text-amber-400">
+                👤
+              </div>
+              <div>
+                <h3 class="font-black text-white text-base m-0">{{ emp.name }}</h3>
+                <span class="text-xs text-amber-400 font-bold">
+                  {{ posService.getRoleLabel(emp.role) }}
+                </span>
+              </div>
+            </div>
+
+            <span [class]="(emp.isActive ?? emp.active ?? true) ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' : 'bg-red-500/20 text-red-400 border-red-500/40'"
+                  class="px-2 py-0.5 rounded-full text-[10px] font-black border">
+              {{ (emp.isActive ?? emp.active ?? true) ? 'ΕΝΕΡΓΟΣ' : 'ΑΝΕΝΕΡΓΟΣ' }}
+            </span>
+          </div>
+
+          <div class="flex justify-between items-center text-xs text-slate-400 pt-2 border-t border-slate-800">
+            <span class="font-mono">PIN: ••••</span>
+            <span class="flex items-center gap-1 font-bold" [class.text-emerald-400]="emp.biometricPublicKey" [class.text-slate-500]="!emp.biometricPublicKey">
+              <span>👆</span>
+              <span>{{ emp.biometricPublicKey ? 'Αποτύπωμα OK' : 'Χωρίς Αποτύπωμα' }}</span>
+            </span>
+          </div>
+
+        </div>
+      }
+    </div>
+
+    <!-- EMPLOYEE EDIT & FINGERPRINT PANEL -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col gap-4">
+      @if (selectedEmployee(); as emp) {
+        <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+          <div>
+            <h2 class="text-lg font-black text-white m-0">{{ emp.name }}</h2>
+            <span class="text-xs text-amber-400 font-bold">ID: {{ emp.id }}</span>
+          </div>
+
+          <button (click)="toggleStatus(emp)"
+                  [class]="(emp.isActive ?? emp.active ?? true) ? 'bg-red-500/20 text-red-400 border-red-500/40' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'"
+                  class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer">
+            {{ (emp.isActive ?? emp.active ?? true) ? 'Απενεργοποίηση' : 'Ενεργοποίηση' }}
+          </button>
+        </div>
+
+        <!-- FINGERPRINT REGISTRATION -->
+        <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col gap-3">
+          <label class="block text-xs font-black text-amber-400 uppercase tracking-wider">
+            🔑 ΒΙΟΜΕΤΡΙΚΗ ΤΑΥΤΟΠΟΙΗΣΗ
+          </label>
+          
+          <button type="button"
+                  (click)="onRegisterFingerprint(emp)"
+                  [disabled]="isRegisteringBiometrics()"
+                  class="w-full py-3.5 px-4 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 font-bold text-xs border border-amber-500/40 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 disabled:opacity-50">
+            <span class="text-lg">👆</span>
+            <span>
+              {{ isRegisteringBiometrics() ? 'Παρακαλώ αγγίξτε τον αισθητήρα...' : (emp.biometricPublicKey ? 'Ενημέρωση Αποτυπώματος' : 'Καταχώρηση Νέου Αποτυπώματος') }}
+            </span>
+          </button>
+
+          @if (emp.biometricPublicKey) {
+            <div class="flex items-center justify-center gap-1.5 text-xs text-emerald-400 font-bold text-center">
+              <span>✓</span>
+              <span>Ενεργοποιημένο αποτύπωμα στη συσκευή</span>
+            </div>
+          } @else {
+            <p class="text-xs text-slate-500 text-center m-0">
+              Δεν έχει καταχωρηθεί αποτύπωμα για αυτόν τον υπάλληλο.
+            </p>
+          }
+        </div>
+
+        <!-- VAULT SHIFT CLOSURE TRIGGER BUTTON -->
+        <button (click)="openVaultModalForEmployee(emp)"
+                class="w-full py-3 px-4 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 font-bold text-xs border border-amber-500/30 flex items-center justify-center gap-2 cursor-pointer transition-all">
+          <span>🔐</span>
+          <span>Κλείσιμο Ταμείου Βάρδιας (Vault)</span>
+        </button>
+
+        <div class="text-xs text-slate-400 flex flex-col gap-1 pt-2">
+          <div><strong>Ωριαία Αμοιβή:</strong> €{{ emp.hourlyRate || 0 }}/ώρα</div>
+          <div><strong>Ρόλος:</strong> {{ posService.getRoleLabel(emp.role) }}</div>
+        </div>
+
+      } @else {
+        <div class="py-16 text-center text-slate-500 font-bold text-xs">
+          👈 Επιλέξτε έναν υπάλληλο από τη λίστα για διαχείριση.
+        </div>
+      }
+    </div>
+
+  </div>
+
+  <!-- MODAL: ADD NEW EMPLOYEE -->
+  @if (showAddModal()) {
+    <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-md shadow-2xl flex flex-col gap-4">
+        
+        <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+          <h3 class="text-lg font-black text-white m-0">➕ Νέος Υπάλληλος</h3>
+          <button (click)="showAddModal.set(false)" class="text-slate-400 hover:text-white text-xl">✕</button>
+        </div>
+
+        <div class="flex flex-col gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-400 mb-1">Όνομα</label>
+            <input type="text" [(ngModel)]="newEmpName" placeholder="π.χ. Γιάννης Παπαδόπουλος"
+                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-amber-400" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-400 mb-1">PIN (4-8 ψηφία)</label>
+            <input type="password" maxlength="8" [(ngModel)]="newEmpPin" placeholder="1234"
+                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-amber-400 font-mono" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-400 mb-1">Ρόλος</label>
+            <select [(ngModel)]="newEmpRole"
+                    class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-amber-400">
+              <option value="WAITER">Σερβιτόρος</option>
+              <option value="BAR">Barista / Μπαρ</option>
+              <option value="KITCHEN">Κουζίνα</option>
+              <option value="MANAGER">Διαχειριστής / Manager</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-400 mb-1">Ωρομίσθιο (€)</label>
+            <input type="number" step="0.5" [(ngModel)]="newEmpRate"
+                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-amber-400" />
+          </div>
+        </div>
+
+        <div class="flex gap-2 pt-2 border-t border-slate-800">
+          <button (click)="showAddModal.set(false)"
+                  class="flex-1 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-slate-300 text-xs">
+            Ακύρωση
+          </button>
+          <button (click)="saveNewEmployee()"
+                  class="flex-1 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 font-black text-slate-950 text-xs shadow-md">
+            Αποθήκευση
+          </button>
+        </div>
+
+      </div>
+    </div>
+  }
+
+  <!-- WAITER VAULT CLOSURE MODAL -->
+  <app-waiter-vault-modal
+    [session]="activeVaultSessionForModal()"
+    [isOpen]="isVaultModalOpen()"
+    (closeModal)="handleCloseVaultModal()"
+    (vaultClosed)="handleVaultClosed($event)"
+  ></app-waiter-vault-modal>
+
+</div>

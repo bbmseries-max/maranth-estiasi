@@ -1,147 +1,147 @@
-import { Component, inject, signal, computed, OnInit, OnDestroy } from '@angular/core';
+import { Component, inject, signal, computed, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterLink } from '@angular/router';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
-import { RestaurantTable, TableOrderItem, ItemPreparationStatus } from '../../core/models/restaurant-pos.models';
-import { doc, setDoc } from 'firebase/firestore';
+import { TableOrderItem, ItemPreparationStatus, OrderStatus } from '../../core/models/restaurant-pos.models';
 
 interface KitchenTicket {
   tableNumber: number;
   zone: string;
   tableId: string;
+  orderId: string;
   waiterName: string;
   openedAt: string;
+  status: OrderStatus;
+  notes?: string;
   items: TableOrderItem[];
 }
 
 @Component({
   selector: 'app-kds-display',
   standalone: true,
-  imports: [CommonModule, RouterLink],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [CommonModule],
   template: `
-    <div class="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
+    <div class="min-h-screen bg-slate-950 p-4 text-slate-100 font-sans select-none">
       
-      <!-- TOP KDS BAR -->
-      <header class="h-16 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between shadow-lg">
-        <div class="flex items-center gap-4">
-          <a routerLink="/floor-plan" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs no-underline flex items-center gap-1.5 transition-all">
-            <span>⬅️</span>
-            <span>Πλάνο</span>
-          </a>
+      <!-- KDS BAR/KITCHEN HEADER & FILTERS -->
+      <div class="flex flex-col sm:flex-row justify-between items-center bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-4 gap-3 shadow-lg">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center text-xl font-black">
+            👨‍🍳
+          </div>
           <div>
-            <h1 class="text-lg font-black text-white m-0 flex items-center gap-2">
-              <span>🍳</span>
-              <span>Οθόνη Κουζίνας & Bar (KDS)</span>
-            </h1>
-            <span class="text-[10px] text-emerald-400 font-bold">● Ζωντανή Σύνδεση</span>
+            <h1 class="text-xl font-black text-white m-0 tracking-tight">KITCHEN & BAR DISPLAY</h1>
+            <p class="text-xs text-slate-400 font-medium m-0">Ενεργές Παραγγελίες ({{ filteredTickets().length }})</p>
           </div>
         </div>
 
-        <!-- FILTER STATIONS -->
-        <div class="flex items-center gap-2">
+        <div class="flex bg-slate-950 p-1 rounded-xl border border-slate-800 gap-1">
           <button (click)="stationFilter.set('ALL')"
-                  class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all"
-                  [ngClass]="stationFilter() === 'ALL' ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-slate-800 text-slate-300 border-slate-700'">
-            🌐 Όλα ({{ activeTickets().length }})
-          </button>
-          <button (click)="stationFilter.set('BAR')"
-                  class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all"
-                  [ngClass]="stationFilter() === 'BAR' ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-slate-800 text-slate-300 border-slate-700'">
-            ☕ Bar / Καφέδες
+                  [class]="stationFilter() === 'ALL' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white font-bold'"
+                  class="px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer">
+            Όλα
           </button>
           <button (click)="stationFilter.set('KITCHEN')"
-                  class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all"
-                  [ngClass]="stationFilter() === 'KITCHEN' ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-slate-800 text-slate-300 border-slate-700'">
-            🍳 Κουζίνα / Φαγητό
+                  [class]="stationFilter() === 'KITCHEN' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white font-bold'"
+                  class="px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer">
+            🍳 Κουζίνα
+          </button>
+          <button (click)="stationFilter.set('BAR')"
+                  [class]="stationFilter() === 'BAR' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white font-bold'"
+                  class="px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer">
+            ☕ Bar / Καφέδες
           </button>
         </div>
-      </header>
+      </div>
 
-      <!-- TICKETS GRID -->
-      <div class="flex-1 p-4 overflow-y-auto">
-        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          
-          @for (ticket of filteredTickets(); track ticket.tableId + ticket.openedAt) {
-            <div class="bg-slate-900 border-2 rounded-2xl flex flex-col justify-between shadow-2xl overflow-hidden transition-all"
-                 [ngClass]="getTicketBorderClass(ticket)">
-              
-              <!-- TICKET HEADER -->
-              <div class="p-3 bg-slate-800/80 border-b border-slate-700 flex justify-between items-center">
+      <!-- KDS TICKETS GRID -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
+        @for (ticket of filteredTickets(); track ticket.orderId) {
+          <div [class]="getTicketBorderClass(ticket)"
+               class="bg-slate-900 border-2 rounded-2xl p-4 shadow-xl flex flex-col justify-between min-h-[220px] transition-all">
+            
+            <div class="flex flex-col gap-3">
+              <!-- Ticket Header -->
+              <div class="flex justify-between items-start border-b border-slate-800 pb-3">
                 <div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-xl font-black text-white">#{{ ticket.tableNumber }}</span>
-                    <span class="text-[10px] bg-slate-700 text-amber-400 px-2 py-0.5 rounded-full font-bold">
-                      📍 {{ ticket.zone }}
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <h3 class="text-2xl font-black text-white m-0">Τραπέζι #{{ ticket.tableNumber }}</h3>
+                    <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                      {{ ticket.zone }}
                     </span>
                   </div>
-                  <span class="text-[10px] text-slate-400 block mt-0.5">👤 {{ ticket.waiterName }}</span>
+                  <span class="text-xs text-slate-400 font-medium">👤 {{ ticket.waiterName }}</span>
                 </div>
-
-                <div class="text-right">
-                  <span class="text-xs font-black px-2 py-1 rounded-lg bg-slate-950 text-slate-200 border border-slate-700">
-                    ⏱️ {{ getElapsedTime(ticket.openedAt) }}
-                  </span>
-                </div>
+                
+                <span class="text-xs font-bold px-2 py-1 rounded-lg bg-slate-950 text-amber-400 border border-slate-800 shrink-0">
+                  ⏱️ {{ getElapsedTime(ticket.openedAt) }}
+                </span>
               </div>
 
-              <!-- TICKET ITEMS LIST -->
-              <div class="p-3 flex-1 flex flex-col gap-2 overflow-y-auto max-h-72">
+              <!-- OVERALL TICKET ORDER NOTE ALERT BADGE -->
+              @if (ticket.notes) {
+                <div class="bg-amber-500/20 border-l-4 border-amber-500 text-amber-300 p-3 text-xs font-bold rounded-r-xl break-words">
+                  ⚠️ ΣΗΜΕΙΩΣΗ ΠΑΡΑΓΓΕΛΙΑΣ: {{ ticket.notes }}
+                </div>
+              }
+
+              <!-- ITEMS LIST -->
+              <div class="flex flex-col gap-2">
                 @for (item of ticket.items; track item.id) {
-                  <div class="p-2.5 rounded-xl border flex flex-col gap-1 transition-all"
-                       [ngClass]="getItemStatusClass(item.status)">
+                  <div [class]="getItemStatusClass(item.status)"
+                       class="p-3 rounded-xl border flex flex-col gap-2 transition-all">
                     
-                    <div class="flex justify-between items-center">
-                      <span class="text-xs font-black text-white">{{ item.quantity }}x {{ item.productName }}</span>
-                      
-                      <!-- ITEM STATUS BUMP BUTTON -->
-                      <button (click)="bumpItemStatus(ticket.tableId, item.id)"
-                              class="text-[10px] font-black uppercase px-2 py-0.5 rounded-md border transition-all active:scale-95"
-                              [ngClass]="getItemButtonClass(item.status)">
+                    <div class="flex justify-between items-center gap-2">
+                      <div class="flex items-center gap-2 font-black text-base text-white min-w-0">
+                        <span class="w-7 h-7 rounded-lg bg-amber-500 text-slate-950 text-xs flex items-center justify-center font-black shrink-0">
+                          {{ item.quantity }}x
+                        </span>
+                        <span class="truncate">{{ item.productName }}</span>
+                      </div>
+
+                      <button (click)="bumpItemStatus(ticket, item)"
+                              [class]="getItemButtonClass(item.status)"
+                              class="px-3 py-1.5 rounded-lg text-xs font-bold border shrink-0 transition-all cursor-pointer active:scale-95">
                         {{ getItemStatusActionLabel(item.status) }}
                       </button>
                     </div>
 
-                    <!-- MODIFIERS LIST -->
+                    <!-- COFFEE / ITEM MODIFIERS -->
                     @if (item.modifiers && item.modifiers.length > 0) {
-                      <div class="flex flex-wrap gap-1 mt-0.5">
+                      <div class="flex flex-wrap gap-1.5 pl-9">
                         @for (mod of item.modifiers; track mod.id) {
-                          <span class="text-[10px] font-bold text-amber-300 bg-slate-950/60 px-1.5 py-0.5 rounded border border-amber-500/30">
+                          <span class="text-xs font-extrabold bg-amber-400/10 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-md">
                             + {{ mod.name }}
                           </span>
                         }
                       </div>
                     }
 
-                    <!-- ITEM NOTES -->
+                    <!-- ITEM SPECIFIC CUSTOMER REQUEST NOTE -->
                     @if (item.itemNotes) {
-                      <span class="text-[10px] font-bold text-red-400 bg-red-950/40 p-1 rounded border border-red-500/30 block">
-                        📝 {{ item.itemNotes }}
-                      </span>
+                      <div class="text-xs font-bold text-rose-400 italic pl-9 break-words">
+                        ↳ Request: "{{ item.itemNotes }}"
+                      </div>
                     }
                   </div>
                 }
               </div>
-
-              <!-- TICKET FOOTER ACTION -->
-              <div class="p-3 bg-slate-800/50 border-t border-slate-800 flex justify-between items-center">
-                <span class="text-[10px] text-slate-400 font-bold">{{ ticket.items.length }} είδη</span>
-                <button (click)="completeEntireTicket(ticket.tableId)"
-                        class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-md transition-all active:scale-95">
-                  ✓ Ολοκλήρωση Τραπεζιού
-                </button>
-              </div>
-
             </div>
-          } @empty {
-            <div class="col-span-full py-24 text-center flex flex-col items-center justify-center text-slate-600">
-              <span class="text-6xl mb-3">👨‍🍳</span>
-              <span class="text-sm font-bold">Δεν υπάρχουν εκκρεμείς παραγγελίες στην κουζίνα!</span>
-            </div>
-          }
 
-        </div>
+            <!-- Complete Entire Ticket Footer Button -->
+            <button (click)="completeEntireTicket(ticket)"
+                    class="mt-4 w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-slate-950 font-black text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer flex items-center justify-center gap-1">
+              <span>✓ Ολοκλήρωση Δελτίου</span>
+            </button>
+
+          </div>
+        } @empty {
+          <div class="col-span-full text-center py-20 bg-slate-900/50 border-2 border-dashed border-slate-800 rounded-3xl text-slate-500 font-bold">
+            <span class="text-4xl block mb-2">☕</span>
+            Δεν υπάρχουν ενεργά δελτία στην κουζίνα / bar.
+          </div>
+        }
       </div>
-
     </div>
   `
 })
@@ -153,45 +153,68 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
   private timerInterval: any;
 
   public activeTickets = computed<KitchenTicket[]>(() => {
-    const list: KitchenTicket[] = [];
+    const tables = this.posService.tables();
+    const tickets: KitchenTicket[] = [];
 
-    for (const table of this.posService.occupiedTables()) {
-      if (table.activeOrder && table.activeOrder.items?.length) {
-        const pendingItems = table.activeOrder.items.filter(
-          i => i.status === 'SENT_TO_KITCHEN' || i.status === 'PREPARING'
-        );
-
+    for (const table of tables) {
+      if (table.activeOrder && table.activeOrder.items && table.activeOrder.items.length > 0) {
+        const pendingItems = table.activeOrder.items.filter(i => i.status !== 'VOIDED' && i.status !== 'SERVED');
+        
         if (pendingItems.length > 0) {
-          list.push({
-            tableNumber: table.tableNumber,
-            zone: table.zone,
+          tickets.push({
+            tableNumber: table.tableNumber || table.number,
+            zone: table.zone || table.section || 'Σάλα',
             tableId: table.id,
-            waiterName: table.assignedWaiterName || 'Σερβιτόρος',
-            openedAt: table.activeOrder.openedAt,
+            orderId: table.activeOrder.orderId,
+            waiterName: table.assignedWaiterName || table.waiterName || 'Σερβιτόρος',
+            openedAt: table.activeOrder.openedAt || new Date().toISOString(),
+            status: 'PREPARING',
+            notes: table.activeOrder.notes,
             items: pendingItems
           });
         }
       }
     }
 
-    return list.sort((a, b) => new Date(a.openedAt).getTime() - new Date(b.openedAt).getTime());
+    return tickets;
   });
 
-  public filteredTickets = computed(() => {
+  public filteredTickets = computed<KitchenTicket[]>(() => {
+    const all = this.activeTickets();
     const filter = this.stationFilter();
-    if (filter === 'ALL') return this.activeTickets();
 
-    return this.activeTickets().map(ticket => {
-      const filteredItems = ticket.items.filter(item => {
-        const isCoffee = item.productId.startsWith('PRD-01') || item.productId.startsWith('PRD-02') || item.productId.startsWith('PRD-03');
-        return filter === 'BAR' ? isCoffee : !isCoffee;
+    if (filter === 'ALL') return all;
+
+    return all.map(ticket => {
+      const matchingItems = ticket.items.filter(item => {
+        const name = (item.productName || '').toLowerCase();
+        const isDrink = name.includes('καφέ') || name.includes('espresso') || name.includes('freddo') || 
+                        name.includes('τσάι') || name.includes('νερό') || name.includes('ποτό') || 
+                        name.includes('μπύρα') || name.includes('χυμό') || name.includes('drink') ||
+                        name.includes('coffee') || name.includes('cocktail') || name.includes('αναψυκτικ') ||
+                        name.includes('σοκολάτα') || name.includes('soda') || name.includes('beer') ||
+                        name.includes('cappuccino') || name.includes('latte');
+        
+        return filter === 'BAR' ? isDrink : !isDrink;
       });
 
-      return { ...ticket, items: filteredItems };
-    }).filter(ticket => ticket.items.length > 0);
+      if (matchingItems.length === 0) return null;
+
+      return {
+        ...ticket,
+        items: matchingItems
+      };
+    }).filter((t): t is KitchenTicket => t !== null);
   });
 
   ngOnInit(): void {
+    const emp = this.posService.currentEmployee();
+    if (emp?.role === 'BARISTA' || emp?.role === 'BAR') {
+      this.stationFilter.set('BAR');
+    } else if (emp?.role === 'KITCHEN') {
+      this.stationFilter.set('KITCHEN');
+    }
+
     this.timerInterval = setInterval(() => {
       this.now.set(Date.now());
     }, 10000);
@@ -204,7 +227,7 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
   public getElapsedTime(openedAt: string): string {
     const diffMs = this.now() - new Date(openedAt).getTime();
     const mins = Math.floor(diffMs / 60000);
-    return `${mins} λ.`;
+    return (mins > 0 ? mins : 1) + ' λ.';
   }
 
   public getTicketBorderClass(ticket: KitchenTicket): string {
@@ -218,7 +241,7 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
 
   public getItemStatusClass(status: ItemPreparationStatus): string {
     switch (status) {
-      case 'PREPARING': return 'bg-amber-950/30 border-amber-500/50';
+      case 'PREPARING': return 'bg-amber-950/40 border-amber-500/60';
       case 'SENT_TO_KITCHEN': return 'bg-slate-950 border-slate-800';
       default: return 'bg-slate-950 border-slate-800';
     }
@@ -226,7 +249,8 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
 
   public getItemButtonClass(status: ItemPreparationStatus): string {
     switch (status) {
-      case 'SENT_TO_KITCHEN': return 'bg-amber-500/20 text-amber-400 border-amber-500/40 hover:bg-amber-500/30';
+      case 'SENT_TO_KITCHEN':
+      case 'PENDING': return 'bg-amber-500/20 text-amber-400 border-amber-500/40 hover:bg-amber-500/30';
       case 'PREPARING': return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 hover:bg-emerald-500/30';
       default: return 'bg-slate-800 text-slate-300 border-slate-700';
     }
@@ -234,57 +258,18 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
 
   public getItemStatusActionLabel(status: ItemPreparationStatus): string {
     switch (status) {
-      case 'SENT_TO_KITCHEN': return '▶️ Έναρξη';
+      case 'SENT_TO_KITCHEN':
+      case 'PENDING': return '▶️ Έναρξη';
       case 'PREPARING': return '✓ Έτοιμο';
-      default: return status;
+      default: return '✓ Έτοιμο';
     }
   }
 
-  public bumpItemStatus(tableId: string, itemId: string): void {
-    const table = this.posService.tables().find(t => t.id === tableId);
-    if (!table || !table.activeOrder) return;
-
-    const updatedItems = table.activeOrder.items.map(item => {
-      if (item.id === itemId) {
-        let nextStatus: ItemPreparationStatus = 'PREPARING';
-        if (item.status === 'PREPARING') nextStatus = 'SERVED';
-        return { ...item, status: nextStatus };
-      }
-      return item;
-    });
-
-    const updatedTable: RestaurantTable = {
-      ...table,
-      activeOrder: {
-        ...table.activeOrder,
-        items: updatedItems
-      }
-    };
-
-    if (this.posService.db) {
-      setDoc(doc(this.posService.db, 'tables', table.id), updatedTable);
-    }
+  public bumpItemStatus(ticket: KitchenTicket, item: TableOrderItem): void {
+    this.posService.bumpOrderItemStatus(ticket.tableId, item.id);
   }
 
-  public completeEntireTicket(tableId: string): void {
-    const table = this.posService.tables().find(t => t.id === tableId);
-    if (!table || !table.activeOrder) return;
-
-    const updatedItems = table.activeOrder.items.map(item => ({
-      ...item,
-      status: 'SERVED' as const
-    }));
-
-    const updatedTable: RestaurantTable = {
-      ...table,
-      activeOrder: {
-        ...table.activeOrder,
-        items: updatedItems
-      }
-    };
-
-    if (this.posService.db) {
-      setDoc(doc(this.posService.db, 'tables', table.id), updatedTable);
-    }
+  public completeEntireTicket(ticket: KitchenTicket): void {
+    this.posService.completeKitchenTicket(ticket.orderId, ticket.tableId);
   }
 }

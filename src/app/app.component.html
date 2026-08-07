@@ -1,10 +1,11 @@
-<div class="min-h-screen w-full bg-slate-900 text-slate-100 flex flex-col font-sans select-none overflow-x-hidden">
+<div class="min-h-screen w-full bg-slate-900 text-slate-100 flex flex-col font-sans select-none overflow-x-hidden relative">
   
   @if (posService.currentEmployee(); as emp) {
+    <!-- TOP NAVIGATION HEADER -->
     <header class="h-16 bg-slate-800 border-b border-slate-700/80 px-4 flex items-center justify-between shadow-lg sticky top-0 z-50">
       
       <div class="flex items-center gap-3">
-        <a routerLink="/floor-plan" class="flex items-center gap-2.5 no-underline">
+        <a [routerLink]="isKitchenOnly(emp.role) ? '/kitchen' : '/floor-plan'" class="flex items-center gap-2.5 no-underline">
           <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-400 flex items-center justify-center text-xl shadow-md">
             ☕
           </div>
@@ -16,49 +17,131 @@
       </div>
 
       <nav class="flex items-center gap-1 sm:gap-2">
-        <a routerLink="/floor-plan" 
-           routerLinkActive="bg-amber-500/20 text-amber-400 border-amber-500/40"
-           class="px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all border border-transparent flex items-center gap-1.5 no-underline">
-          <span>🪑</span>
-          <span class="hidden md:inline">Τραπέζια</span>
-        </a>
+        @if (canAccessFloorPlan(emp.role)) {
+          <a routerLink="/floor-plan" 
+             routerLinkActive="bg-amber-500/20 text-amber-400 border-amber-500/40"
+             class="px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all border border-transparent flex items-center gap-1.5 no-underline">
+            <span>🪑</span>
+            <span class="hidden md:inline">Τραπέζια</span>
+          </a>
+        }
 
-        <a routerLink="/kitchen" 
-           routerLinkActive="bg-amber-500/20 text-amber-400 border-amber-500/40"
-           class="px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all border border-transparent flex items-center gap-1.5 no-underline">
-          <span>🍳</span>
-          <span class="hidden md:inline">Κουζίνα</span>
-        </a>
+        @if (canAccessKitchen(emp.role)) {
+          <a routerLink="/kitchen" 
+             routerLinkActive="bg-amber-500/20 text-amber-400 border-amber-500/40"
+             class="px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all border border-transparent flex items-center gap-1.5 no-underline">
+            <span>🍳</span>
+            <span class="hidden md:inline">Κουζίνα / Bar</span>
+          </a>
+        }
 
-        <a routerLink="/inventory" 
-           routerLinkActive="bg-amber-500/20 text-amber-400 border-amber-500/40"
-           class="px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all border border-transparent flex items-center gap-1.5 no-underline">
-          <span>📦</span>
-          <span class="hidden md:inline">Αποθήκη</span>
-        </a>
+        @if (canAccessManagement(emp.role)) {
+          <a routerLink="/inventory" 
+             routerLinkActive="bg-amber-500/20 text-amber-400 border-amber-500/40"
+             class="px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all border border-transparent flex items-center gap-1.5 no-underline">
+            <span>📦</span>
+            <span class="hidden md:inline">Αποθήκη</span>
+          </a>
 
-        <a routerLink="/reports" 
-           routerLinkActive="bg-amber-500/20 text-amber-400 border-amber-500/40"
-           class="px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all border border-transparent flex items-center gap-1.5 no-underline">
-          <span>📊</span>
-          <span class="hidden md:inline">Z-Report</span>
-        </a>
+          <a routerLink="/reports" 
+             routerLinkActive="bg-amber-500/20 text-amber-400 border-amber-500/40"
+             class="px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all border border-transparent flex items-center gap-1.5 no-underline">
+            <span>📊</span>
+            <span class="hidden md:inline">Z-Report</span>
+          </a>
+        }
       </nav>
 
       <div class="flex items-center gap-3">
+        <!-- HEADER NOTIFICATION BELL & DRAWER -->
+        <div class="relative">
+          <button (click)="isBellDrawerOpen.set(!isBellDrawerOpen())" 
+                  class="p-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 relative transition-all active:scale-95 cursor-pointer">
+            <span class="text-base">🔔</span>
+            @if (posService.unreadReadyNotifications().length > 0) {
+              <span class="absolute -top-1 -right-1 bg-emerald-500 text-slate-950 font-black text-[10px] w-5 h-5 rounded-full flex items-center justify-center border-2 border-slate-900 animate-pulse">
+                {{ posService.unreadReadyNotifications().length }}
+              </span>
+            }
+          </button>
+
+          <!-- BELL DROPDOWN DRAWER -->
+          @if (isBellDrawerOpen()) {
+            <div class="absolute right-0 mt-2 w-80 bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl p-3 z-50 flex flex-col gap-2">
+              <div class="flex justify-between items-center border-b border-slate-700 pb-2">
+                <span class="text-xs font-black text-white">🔔 Έτοιμες Παραγγελίες</span>
+                @if (posService.unreadReadyNotifications().length > 0) {
+                  <button (click)="posService.clearAllNotifications()" class="text-[10px] font-bold text-amber-400 hover:underline cursor-pointer">
+                    Εκκαθάριση
+                  </button>
+                }
+              </div>
+
+              <div class="max-h-60 overflow-y-auto flex flex-col gap-2">
+                @for (notif of posService.unreadReadyNotifications(); track notif.id) {
+                  <div class="p-2.5 rounded-xl bg-slate-900 border border-emerald-500/30 flex justify-between items-center">
+                    <div>
+                      <div class="flex items-center gap-1.5">
+                        <span class="text-xs font-black text-white">#{{ notif.tableNumber }}</span>
+                        <span class="text-[9px] bg-slate-800 text-emerald-400 px-1.5 py-0.5 rounded font-bold">📍 {{ notif.zone }}</span>
+                      </div>
+                      <span class="text-xs font-bold text-emerald-300 block mt-0.5">{{ notif.itemSummary }}</span>
+                      <span class="text-[9px] text-slate-400 block">{{ notif.readyAt }}</span>
+                    </div>
+
+                    <button (click)="posService.dismissNotification(notif.id)" class="text-slate-400 hover:text-white text-xs font-bold p-1 cursor-pointer">
+                      ✕
+                    </button>
+                  </div>
+                } @empty {
+                  <div class="py-6 text-center text-slate-500 text-xs font-bold">
+                    Δεν υπάρχουν εκκρεμείς ειδοποιήσεις.
+                  </div>
+                }
+              </div>
+            </div>
+          }
+        </div>
+
         <div class="hidden lg:flex flex-col items-end">
           <span class="text-xs font-bold text-white">{{ emp.name }}</span>
-          <span class="text-[10px] text-emerald-400 font-medium">● Βάρδια σε ισχύ</span>
+          <span class="text-[10px] text-emerald-400 font-medium">● {{ getRoleBadgeLabel(emp.role) }}</span>
         </div>
 
         <button (click)="posService.logoutEmployee()" 
-                class="p-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all active:scale-95 flex items-center justify-center"
+                class="px-3 py-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
                 title="Έξοδος">
-          🚪
+          <span>🚪</span>
+          <span class="hidden sm:inline">Έξοδος</span>
         </button>
       </div>
 
     </header>
+
+    <!-- FLOATING TOAST BANNER (ONLY SHOWN WHEN LOGGED IN) -->
+    @if (posService.unreadReadyNotifications().length > 0) {
+      <div class="fixed top-20 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+        @for (notif of posService.unreadReadyNotifications() | slice:0:3; track notif.id) {
+          <div class="pointer-events-auto bg-slate-900/95 border-2 border-emerald-500 rounded-2xl p-3.5 shadow-2xl flex items-center justify-between gap-3 backdrop-blur-md transition-all">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-xl text-emerald-400 font-bold shrink-0 animate-pulse">
+                🟢
+              </div>
+              <div class="flex flex-col">
+                <span class="text-xs font-black text-white">Τραπέζι #{{ notif.tableNumber }} (📍 {{ notif.zone }})</span>
+                <span class="text-xs font-bold text-emerald-400 mt-0.5">{{ notif.itemSummary }}</span>
+                <span class="text-[9px] text-slate-400 font-medium">Έτοιμο στις {{ notif.readyAt }}</span>
+              </div>
+            </div>
+
+            <button (click)="posService.dismissNotification(notif.id)" 
+                    class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-[10px] uppercase shadow-sm cursor-pointer">
+              ✓ OK
+            </button>
+          </div>
+        }
+      </div>
+    }
   }
 
   <main class="flex-1 w-full flex flex-col">

@@ -1,289 +1,157 @@
-import { Component, inject, signal, computed } from '@angular/core';
+import { Component, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
-import { RestaurantTable, PaymentMethod } from '../../core/models/restaurant-pos.models';
+import { RestaurantTable } from '../../core/models/restaurant-pos.models';
+
+export type TableVisualStatus = 'FREE' | 'PENDING' | 'PREPARING' | 'READY_TO_SERVE' | 'BILL_PRINTED';
 
 @Component({
   selector: 'app-floor-plan',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [CommonModule, FormsModule],
   template: `
-    <div class="min-h-screen bg-slate-900 text-slate-100 p-4 sm:p-6 font-sans select-none flex flex-col gap-6">
+    <div class="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
       
-      <!-- TOP METRICS & QUICK SHIFT STATS BAR -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        
-        <div class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-4 flex flex-col justify-between shadow-md">
-          <div class="flex justify-between items-center text-xs font-bold text-slate-400 uppercase tracking-wider">
-            <span>Ενεργά Τραπέζια</span>
-            <span class="text-lg">🪑</span>
+      <!-- TOP CONTROL & ZONE FILTER BAR -->
+      <header class="h-16 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between shadow-lg sticky top-0 z-30">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-xl shadow-md">
+            🪑
           </div>
-          <div class="flex items-baseline gap-2 mt-2">
-            <span class="text-2xl sm:text-3xl font-black text-white">
-              {{ posService.occupiedTables().length }}
-            </span>
-            <span class="text-xs text-slate-400 font-bold">/ {{ posService.tables().length }} τραπέζια</span>
-          </div>
-        </div>
-
-        <div class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-4 flex flex-col justify-between shadow-md">
-          <div class="flex justify-between items-center text-xs font-bold text-slate-400 uppercase tracking-wider">
-            <span>Ζωντανός Τζίρος Σάλας</span>
-            <span class="text-lg">💶</span>
-          </div>
-          <div class="mt-2">
-            <span class="text-2xl sm:text-3xl font-black text-emerald-400">
-              €{{ posService.totalLiveFloorRevenue().toFixed(2) }}
+          <div>
+            <h1 class="text-base font-black text-white m-0 leading-none">Πλάνο Τραπεζιών</h1>
+            <span class="text-[10px] text-amber-400 font-bold block mt-1">
+              {{ posService.currentEmployee()?.name || 'Χρήστης' }} ({{ posService.currentEmployee()?.role }})
             </span>
           </div>
         </div>
 
-        <div class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-4 flex flex-col justify-between shadow-md">
-          <div class="flex justify-between items-center text-xs font-bold text-slate-400 uppercase tracking-wider">
-            <span>Ταμείο Σερβιτόρου</span>
-            <span class="text-lg">👛</span>
-          </div>
-          <div class="mt-2 flex flex-col">
-            <span class="text-xl font-black text-amber-400">
-              €{{ (posService.activeVaultSession()?.startingFloat || 0) + (posService.activeVaultSession()?.cashCollected || 0) | number:'1.2-2' }}
-            </span>
-            <span class="text-[10px] text-slate-400">Μετρητά στο πορτοφόλι</span>
-          </div>
-        </div>
-
-        <div class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-4 flex flex-col justify-between shadow-md">
-          <div class="flex justify-between items-center text-xs font-bold text-slate-400 uppercase tracking-wider">
-            <span>Σερβιτόρος Βάρδιας</span>
-            <span class="text-lg">👤</span>
-          </div>
-          <div class="mt-2 flex flex-col">
-            <span class="text-sm font-black text-white truncate">
-              {{ posService.currentEmployee()?.name || 'Μη συνδεδεμένος' }}
-            </span>
-            <span class="text-[10px] text-emerald-400 font-bold">● Ενεργός</span>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- ZONE FILTER TABS & QUICK ACTIONS -->
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-800/50 p-2.5 rounded-2xl border border-slate-700/60">
-        
-        <!-- ZONE TABS -->
-        <div class="flex flex-wrap gap-2 w-full sm:w-auto">
+        <!-- ZONE FILTERS -->
+        <div class="flex items-center gap-1.5 overflow-x-auto hide-scrollbar">
           <button (click)="selectedZone.set('ALL')"
-                  class="px-4 py-2 rounded-xl text-xs font-bold transition-all border"
-                  [ngClass]="selectedZone() === 'ALL' 
-                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md scale-105' 
-                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
-            🌐 Όλες οι Ζώνες ({{ posService.tables().length }})
+                  class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
+                  [ngClass]="selectedZone() === 'ALL' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+            🌐 Όλα
+          </button>
+          
+          <button (click)="selectedZone.set('Σάλα')"
+                  class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
+                  [ngClass]="selectedZone() === 'Σάλα' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+            🏠 Σάλα
           </button>
 
-          @for (zone of availableZones(); track zone) {
-            <button (click)="selectedZone.set(zone)"
-                    class="px-4 py-2 rounded-xl text-xs font-bold transition-all border"
-                    [ngClass]="selectedZone() === zone 
-                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md scale-105' 
-                      : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
-              📍 {{ zone }}
-            </button>
-          }
+          <button (click)="selectedZone.set('Αυλή')"
+                  class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
+                  [ngClass]="selectedZone() === 'Αυλή' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+            🌿 Αυλή
+          </button>
+
+          <button (click)="selectedZone.set('Bar')"
+                  class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
+                  [ngClass]="selectedZone() === 'Bar' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+            ☕ Bar
+          </button>
         </div>
 
-        <!-- LEGEND STATUS BADGES -->
-        <div class="hidden lg:flex items-center gap-4 text-xs font-bold text-slate-400 px-2">
-          <div class="flex items-center gap-1.5">
-            <span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span>
-            <span>Ελεύθερο</span>
-          </div>
-          <div class="flex items-center gap-1.5">
-            <span class="w-3 h-3 rounded-full bg-red-500 inline-block animate-pulse"></span>
-            <span>Κατειλημμένο</span>
-          </div>
-          <div class="flex items-center gap-1.5">
-            <span class="w-3 h-3 rounded-full bg-amber-400 inline-block"></span>
-            <span>Λογαριασμός</span>
-          </div>
+        <!-- SINGLE TAKEAWAY ACTION BUTTON -->
+        <div class="flex items-center gap-3">
+          <button (click)="openTakeaway()"
+                  class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-lg transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer">
+            <span>🛍️</span>
+            <span>Γρήγορο Πακέτο</span>
+          </button>
         </div>
+      </header>
 
-      </div>
-
-      <!-- TABLE GRID CARDS -->
-      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 flex-1">
-        
-        @for (table of filteredTables(); track table.id) {
+      <!-- MAIN TABLE GRID -->
+      <main class="flex-1 p-4 md:p-6 overflow-y-auto">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
           
-          <div class="relative bg-slate-800 rounded-3xl border-2 p-4 flex flex-col justify-between shadow-xl transition-all duration-200 hover:-translate-y-1 cursor-pointer group min-h-[170px]"
-               [ngClass]="{
-                 'border-emerald-500/60 bg-emerald-950/10 hover:border-emerald-400': table.status === 'AVAILABLE',
-                 'border-red-500/80 bg-red-950/20 hover:border-red-400 shadow-red-900/20': table.status === 'OCCUPIED',
-                 'border-amber-400/80 bg-amber-950/20 hover:border-amber-300': table.status === 'BILL_PRINTED',
-                 'border-blue-500/80 bg-blue-950/20': table.status === 'RESERVED'
-               }"
-               (click)="navigateToOrder(table)">
-            
-            <!-- TABLE HEADER (Number & Capacity) -->
-            <div class="flex justify-between items-start">
-              <div>
-                <span class="text-xs font-black uppercase tracking-wider text-slate-400 block">Τραπέζι</span>
-                <span class="text-3xl font-black text-white leading-none">#{{ table.tableNumber }}</span>
-              </div>
-
-              <!-- STATUS BADGE -->
-              <span class="text-[10px] font-black uppercase px-2 py-1 rounded-full border shadow-sm"
-                    [ngClass]="{
-                      'bg-emerald-500/20 text-emerald-400 border-emerald-500/40': table.status === 'AVAILABLE',
-                      'bg-red-500/20 text-red-400 border-red-500/40': table.status === 'OCCUPIED',
-                      'bg-amber-500/20 text-amber-400 border-amber-500/40': table.status === 'BILL_PRINTED',
-                      'bg-blue-500/20 text-blue-400 border-blue-500/40': table.status === 'RESERVED'
-                    }">
-                {{ getStatusLabel(table.status) }}
-              </span>
-            </div>
-
-            <!-- TABLE CONTENT (Active Order Info or Empty State) -->
-            <div class="my-2">
-              @if (table.activeOrder; as order) {
-                <div class="flex flex-col">
-                  <span class="text-xs text-slate-300 font-bold truncate">👤 {{ table.assignedWaiterName || 'Σερβιτόρος' }}</span>
-                  <span class="text-xl font-black text-amber-400 mt-1">€{{ order.grandTotal.toFixed(2) }}</span>
-                  <span class="text-[10px] text-slate-400 font-medium">📦 {{ order.items.length }} είδη</span>
-                </div>
-              } @else {
-                <div class="flex flex-col items-center justify-center text-slate-500 py-2">
-                  <span class="text-2xl">👥</span>
-                  <span class="text-[10px] font-bold mt-1">{{ table.capacity }} άτομα</span>
-                </div>
-              }
-            </div>
-
-            <!-- TABLE FOOTER ACTIONS -->
-            <div class="pt-2 border-t border-slate-700/60 flex justify-between items-center text-xs font-bold">
-              <span class="text-[11px] text-slate-400">📍 {{ table.zone }}</span>
-
-              @if (table.status === 'OCCUPIED' || table.status === 'BILL_PRINTED') {
-                <div class="flex items-center gap-1">
-                  <!-- TRANSFER TABLE BUTTON -->
-                  <button (click)="openTransferModal(table, $event)" 
-                          class="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors"
-                          title="Μεταφορά Τραπεζιού">
-                    ➡️
-                  </button>
-                  <!-- QUICK PAY SETTLE BUTTON -->
-                  <button (click)="openQuickPayModal(table, $event)" 
-                          class="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
-                          title="Εξόφληση">
-                    💳
-                  </button>
-                </div>
-              } @else {
-                <span class="text-emerald-400 group-hover:translate-x-1 transition-transform">Νέα Παραγγελία ➔</span>
-              }
-            </div>
-
-          </div>
-
-        } @empty {
-          <div class="col-span-full py-16 text-center text-slate-400 font-bold bg-slate-800/40 rounded-3xl border border-dashed border-slate-700">
-            Δεν βρέθηκαν τραπέζια σε αυτή τη ζώνη.
-          </div>
-        }
-
-      </div>
-
-      <!-- MODAL: TRANSFER TABLE -->
-      @if (activeTransferTable(); as sourceTable) {
-        <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div class="bg-slate-800 border border-slate-700 rounded-3xl p-6 w-full max-w-md shadow-2xl flex flex-col gap-4">
-            
-            <div class="flex justify-between items-center border-b border-slate-700 pb-3">
-              <h3 class="text-lg font-black text-white m-0">➡️ Μεταφορά Παραγγελίας</h3>
-              <button (click)="activeTransferTable.set(null)" class="text-slate-400 hover:text-white text-xl">✕</button>
-            </div>
-
-            <p class="text-xs text-slate-300 font-medium m-0">
-              Μεταφορά λογαριασμού <strong class="text-amber-400">€{{ sourceTable.activeOrder?.grandTotal?.toFixed(2) }}</strong> από το <strong>Τραπέζι #{{ sourceTable.tableNumber }}</strong>.
-            </p>
-
-            <div class="flex flex-col gap-2">
-              <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">Επιλέξτε Ελεύθερο Τραπέζι Υποδοχής</label>
+          @for (table of filteredTables(); track table.id) {
+            <div (click)="onTableSelect(table)"
+                 class="bg-slate-900 border-2 rounded-3xl p-4 flex flex-col justify-between min-h-[140px] cursor-pointer shadow-xl transition-all duration-200 hover:scale-[1.02] active:scale-95 group relative overflow-hidden"
+                 [ngClass]="getTableCardBorderClass(table)">
               
-              <div class="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1">
-                @for (targetTable of posService.availableTables(); track targetTable.id) {
-                  <button (click)="selectedTargetTableId.set(targetTable.id)"
-                          class="p-3 rounded-2xl border text-center transition-all flex flex-col items-center justify-center"
-                          [ngClass]="selectedTargetTableId() === targetTable.id 
-                            ? 'bg-amber-500 text-slate-950 border-amber-400 font-black scale-105 shadow-md' 
-                            : 'bg-slate-900 text-slate-200 border-slate-700 hover:border-slate-500'">
-                    <span class="text-base font-bold">#{{ targetTable.tableNumber }}</span>
-                    <span class="text-[10px] text-slate-400">{{ targetTable.zone }}</span>
-                  </button>
-                } @empty {
-                  <div class="col-span-3 text-xs text-red-400 font-bold text-center py-4">
-                    Δεν υπάρχουν ελεύθερα τραπέζια αυτή τη στιγμή!
-                  </div>
+              <!-- CARD TOP HEADER: NUMBER & KITCHEN PREPARATION BADGE -->
+              <div class="flex justify-between items-start">
+                <div class="flex flex-col">
+                  <span class="text-2xl font-black text-white group-hover:text-amber-400 transition-colors">
+                    #{{ table.tableNumber || table.number }}
+                  </span>
+                  <span class="text-[10px] font-bold text-slate-400 uppercase mt-0.5">
+                    📍 {{ table.zone || table.section || 'Σάλα' }}
+                  </span>
+                </div>
+
+                <!-- 🎯 DYNAMIC VISUAL KITCHEN / ORDER STATUS BADGE -->
+                @switch (getTableVisualStatus(table)) {
+                  @case ('PREPARING') {
+                    <span class="px-2.5 py-1 rounded-full bg-amber-500/20 border border-amber-400/60 text-amber-300 text-[10px] font-black flex items-center gap-1 animate-pulse shadow-[0_0_12px_rgba(245,158,11,0.3)]">
+                      <span class="text-xs">👨‍🍳</span>
+                      <span>Ετοιμάζεται</span>
+                    </span>
+                  }
+                  @case ('READY_TO_SERVE') {
+                    <span class="px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/60 text-emerald-300 text-[10px] font-black flex items-center gap-1 shadow-[0_0_12px_rgba(16,185,129,0.4)] animate-pulse">
+                      <span class="text-xs">🔔</span>
+                      <span>Έτοιμο</span>
+                    </span>
+                  }
+                  @case ('BILL_PRINTED') {
+                    <span class="px-2.5 py-1 rounded-full bg-sky-500/20 border border-sky-400/60 text-sky-300 text-[10px] font-black flex items-center gap-1">
+                      <span class="text-xs">🧾</span>
+                      <span>Λογαριασμός</span>
+                    </span>
+                  }
+                  @case ('PENDING') {
+                    <span class="px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-bold flex items-center gap-1">
+                      <span class="text-xs">⌛</span>
+                      <span>Εκκρεμεί</span>
+                    </span>
+                  }
+                  @default {
+                    <span class="px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-500 text-[10px] font-bold border border-slate-700/50">
+                      🟢 Ελεύθερο
+                    </span>
+                  }
                 }
               </div>
-            </div>
 
-            <div class="flex gap-2 pt-2 border-t border-slate-700">
-              <button (click)="activeTransferTable.set(null)" 
-                      class="flex-1 py-3 rounded-xl bg-slate-700 hover:bg-slate-600 font-bold text-slate-200 text-xs">
-                Ακύρωση
-              </button>
-              <button (click)="confirmTransfer(sourceTable.id)" 
-                      [disabled]="!selectedTargetTableId()"
-                      class="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 font-bold text-white text-xs shadow-md">
-                Επιβεβαίωση Μεταφοράς
-              </button>
-            </div>
-
-          </div>
-        </div>
-      }
-
-      <!-- MODAL: QUICK SETTLEMENT PAYMENT -->
-      @if (activePayTable(); as payTable) {
-        <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div class="bg-slate-800 border border-slate-700 rounded-3xl p-6 w-full max-w-md shadow-2xl flex flex-col gap-5">
-            
-            <div class="flex justify-between items-center border-b border-slate-700 pb-3">
-              <div>
-                <h3 class="text-lg font-black text-white m-0">💳 Εξόφληση Τραπεζιού #{{ payTable.tableNumber }}</h3>
-                <span class="text-xs text-slate-400">Σερβιτόρος: {{ payTable.assignedWaiterName }}</span>
+              <!-- CARD BODY: CAPACITY & WAITER -->
+              <div class="my-2 flex flex-col gap-0.5">
+                <span class="text-[11px] font-medium text-slate-400 flex items-center gap-1">
+                  👥 {{ table.capacity || table.seats || 4 }} άτομα
+                </span>
+                
+                @if (table.assignedWaiterName || table.waiterName; as waiter) {
+                  <span class="text-[10px] font-bold text-amber-300/90 truncate">
+                    👤 {{ waiter }}
+                  </span>
+                }
               </div>
-              <button (click)="activePayTable.set(null)" class="text-slate-400 hover:text-white text-xl">✕</button>
+
+              <!-- CARD FOOTER: GRAND TOTAL -->
+              <div class="pt-2 border-t border-slate-800 flex justify-between items-end">
+                <span class="text-[10px] font-bold text-slate-500 uppercase">Σύνολο:</span>
+                <span class="text-base font-black"
+                      [ngClass]="(table.activeOrder?.grandTotal || table.currentTotal || 0) > 0 ? 'text-emerald-400' : 'text-slate-500'">
+                  €{{ (table.activeOrder?.grandTotal || table.currentTotal || 0).toFixed(2) }}
+                </span>
+              </div>
+
             </div>
-
-            <div class="bg-slate-900 border border-slate-700 rounded-2xl p-4 flex flex-col items-center">
-              <span class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Τελικό Πληρωτέο Ποσό</span>
-              <span class="text-4xl font-black text-emerald-400">€{{ payTable.activeOrder?.grandTotal?.toFixed(2) }}</span>
+          } @empty {
+            <div class="col-span-full py-24 text-center flex flex-col items-center justify-center text-slate-600">
+              <span class="text-6xl mb-3">🪑</span>
+              <span class="text-sm font-bold">Δεν βρέθηκαν τραπέζια στη συγκεκριμένη ζώνη.</span>
             </div>
+          }
 
-            <div class="grid grid-cols-2 gap-3">
-              <button (click)="confirmSettlement(payTable.id, 'CASH')"
-                      class="p-4 rounded-2xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/40 font-bold text-base flex flex-col items-center gap-2 transition-all active:scale-95">
-                <span class="text-3xl">💵</span>
-                <span>Μετρητά</span>
-              </button>
-
-              <button (click)="confirmSettlement(payTable.id, 'CARD')"
-                      class="p-4 rounded-2xl bg-sky-600/20 hover:bg-sky-600/30 text-sky-400 border border-sky-500/40 font-bold text-base flex flex-col items-center gap-2 transition-all active:scale-95">
-                <span class="text-3xl">💳</span>
-                <span>Κάρτα / POS</span>
-              </button>
-            </div>
-
-            <button (click)="activePayTable.set(null)" 
-                    class="w-full py-3 rounded-xl bg-slate-700 hover:bg-slate-600 font-bold text-slate-300 text-xs">
-              Ακύρωση
-            </button>
-
-          </div>
         </div>
-      }
+      </main>
 
     </div>
   `
@@ -293,56 +161,85 @@ export class FloorPlanComponent {
   public router = inject(Router);
 
   public selectedZone = signal<string>('ALL');
-  public activeTransferTable = signal<RestaurantTable | null>(null);
-  public selectedTargetTableId = signal<string | null>(null);
-  public activePayTable = signal<RestaurantTable | null>(null);
-
-  public availableZones = computed(() => {
-    const zones = this.posService.tables().map(t => t.zone);
-    return Array.from(new Set(zones));
-  });
 
   public filteredTables = computed(() => {
+    // Exclude takeaway virtual table from table grid so Takeaway is only opened via top button
+    const all = this.posService.tables().filter(t => t.id !== 'takeaway-counter' && t.zone !== 'Takeaway');
     const zone = this.selectedZone();
-    if (zone === 'ALL') return this.posService.tables();
-    return this.posService.tables().filter(t => t.zone === zone);
+
+    if (zone === 'ALL') return all;
+    return all.filter(t => (t.zone === zone || t.section === zone));
   });
 
-  public getStatusLabel(status: string): string {
-    switch (status) {
-      case 'AVAILABLE': return 'Ελεύθερο';
-      case 'OCCUPIED': return 'Κατειλημμένο';
-      case 'BILL_PRINTED': return 'Λογαριασμός';
-      case 'RESERVED': return 'Κεκλεισμένο';
-      default: return status;
-    }
-  }
-
-  public navigateToOrder(table: RestaurantTable): void {
+  public onTableSelect(table: RestaurantTable): void {
     this.router.navigate(['/order', table.id]);
   }
 
-  public openTransferModal(table: RestaurantTable, event: Event): void {
-    event.stopPropagation();
-    this.activeTransferTable.set(table);
-    this.selectedTargetTableId.set(null);
-  }
-
-  public confirmTransfer(fromTableId: string): void {
-    const targetId = this.selectedTargetTableId();
-    if (targetId) {
-      this.posService.transferTable(fromTableId, targetId);
-      this.activeTransferTable.set(null);
+  public openTakeaway(): void {
+    let takeawayTable = this.posService.tables().find(t => t.id === 'takeaway-counter');
+    if (!takeawayTable) {
+      takeawayTable = {
+        id: 'takeaway-counter',
+        number: 99,
+        tableNumber: 99,
+        name: '🛍️ Takeaway / Πακέτο',
+        seats: 1,
+        capacity: 1,
+        section: 'BAR',
+        zone: 'Takeaway',
+        status: 'FREE',
+        currentTotal: 0
+      };
     }
+    this.router.navigate(['/order', takeawayTable.id]);
   }
 
-  public openQuickPayModal(table: RestaurantTable, event: Event): void {
-    event.stopPropagation();
-    this.activePayTable.set(table);
+  public isTableReady(table: RestaurantTable): boolean {
+    const notifications = this.posService.unreadReadyNotifications();
+    return notifications.some(n => n.tableId === table.id);
   }
 
-  public confirmSettlement(tableId: string, method: PaymentMethod): void {
-    this.posService.settleTablePayment(tableId, method);
-    this.activePayTable.set(null);
+  public getTableVisualStatus(table: RestaurantTable): TableVisualStatus {
+    if (this.isTableReady(table)) {
+      return 'READY_TO_SERVE';
+    }
+    if (!table.status || table.status === 'FREE' || !table.activeOrder) {
+      return 'FREE';
+    }
+    if (table.status === 'BILL_PRINTED') {
+      return 'BILL_PRINTED';
+    }
+
+    const items = (table.activeOrder.items || []).filter(i => i.status !== 'VOIDED');
+    if (items.length === 0) return 'FREE';
+
+    const statuses = items.map(i => i.status);
+
+    if (statuses.includes('PREPARING') || statuses.includes('SENT_TO_KITCHEN')) {
+      return 'PREPARING';
+    }
+
+    if (statuses.every(s => s === 'SERVED')) {
+      return 'READY_TO_SERVE';
+    }
+
+    return 'PENDING';
+  }
+
+  public getTableCardBorderClass(table: RestaurantTable): string {
+    const visualStatus = this.getTableVisualStatus(table);
+
+    switch (visualStatus) {
+      case 'READY_TO_SERVE':
+        return 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)] bg-emerald-950/20';
+      case 'PREPARING':
+        return 'border-amber-500/80 shadow-[0_0_15px_rgba(245,158,11,0.2)] bg-amber-950/20';
+      case 'BILL_PRINTED':
+        return 'border-sky-400/80 hover:border-sky-400 bg-sky-950/20';
+      case 'PENDING':
+        return 'border-red-500/50 hover:border-red-500/90 bg-red-950/20';
+      default:
+        return 'border-slate-800 hover:border-emerald-500/50';
+    }
   }
 }
