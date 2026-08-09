@@ -1,6 +1,7 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { AutoLogoutService } from '../../core/services/auto-logout.service';
 import { Router } from '@angular/router';
 import { Employee } from '../../core/models/restaurant-pos.models';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
@@ -138,12 +139,14 @@ import { RestaurantPosService } from '../../core/services/restaurant-pos.service
 })
 export class WaiterLoginComponent implements OnInit {
   public posService = inject(RestaurantPosService);
-  public router = inject(Router);
+  private autoLogoutService = inject(AutoLogoutService);
+  private router = inject(Router);
 
   public step = signal<'PIN_ENTRY' | 'SHIFT_SETUP'>('PIN_ENTRY');
   public enteredPin = signal<string>('');
   public errorMessage = signal<string>('');
   public startingFloat: number = 50;
+  
   public supportsBiometrics = false;
 
   ngOnInit(): void {
@@ -153,12 +156,7 @@ export class WaiterLoginComponent implements OnInit {
     
     const emp = this.posService.currentEmployee();
     if (emp) {
-      const activeShift = this.posService.getEmployeeActiveShift(emp.id);
-      if (activeShift) {
-        this.redirectByRole(emp.role);
-      } else {
-        this.step.set('SHIFT_SETUP');
-      }
+      this.handleSuccessfulLogin(emp);
     } else {
       this.step.set('PIN_ENTRY');
     }
@@ -188,82 +186,110 @@ export class WaiterLoginComponent implements OnInit {
     }
   }
 
-public async loginWithBiometrics(): Promise<void> {
-  this.errorMessage.set('');
+  public async loginWithBiometrics(): Promise<void> {
+    this.errorMessage.set('');
 
-  // 1. Security Context Check
-  if (!window.isSecureContext && window.location.hostname !== 'localhost') {
-    this.errorMessage.set('Τα βιομετρικά απαιτούν ασφαλή σύνδεση (HTTPS) ή localhost.');
-    return;
-  }
-
-  try {
-    const enrolledEmployees = this.posService.employees().filter(e => !!e.biometricPublicKey);
-
-    if (enrolledEmployees.length === 0) {
-      this.errorMessage.set('Δεν υπάρχει καταχωρημένο αποτύπωμα στο σύστημα.');
+    if (!window.isSecureContext && window.location.hostname !== 'localhost') {
+      this.errorMessage.set('Τα βιομετρικά απαιτούν ασφαλή σύνδεση (HTTPS) ή localhost.');
       return;
     }
 
-    // 2. Explicitly type as PublicKeyCredentialDescriptor[]
-    const allowCredentialsList: PublicKeyCredentialDescriptor[] = [];
+    try {
+      const enrolledEmployees = this.posService.employees().filter(e => !!e.biometricPublicKey);
 
-    for (const e of enrolledEmployees) {
-      if (!e.biometricPublicKey) continue;
-      try {
-        const base64 = e.biometricPublicKey.replace(/-/g, '+').replace(/_/g, '/');
-        const pad = base64.length % 4 === 0 ? '' : '='.repeat(4 - (base64.length % 4));
-        const binary = atob(base64 + pad);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-          bytes[i] = binary.charCodeAt(i);
+      if (enrolledEmployees.length === 0) {
+        this.errorMessage.set('Δεν υπάρχει καταχωρημένο αποτύπωμα στο σύστημα.');
+        return;
+      }
+
+      const allowCredentialsList: PublicKeyCredentialDescriptor[] = [];
+
+      for (const e of enrolledEmployees) {
+        if (!e.biometricPublicKey) continue;
+        try {
+          const base64 = e.biometricPublicKey.replace(/-/g, '+').replace(/_/g, '/');
+          const pad = base64.length % 4 === 0 ? '' : '='.repeat(4 - (base64.length % 4));
+          const binary = atob(base64 + pad);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          allowCredentialsList.push({
+            id: bytes,
+            type: 'public-key'
+          });
+        } catch {
+          // Skip malformed public keys safely
         }
-        allowCredentialsList.push({
-          id: bytes,
-          type: 'public-key'
-        });
-      } catch {
-        // Skip malformed public keys safely
       }
-    }
 
-    // 3. Build options object cleanly
-    const publicKeyOptions: PublicKeyCredentialRequestOptions = {
-      challenge: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 0]),
-      timeout: 60000,
-      userVerification: 'preferred'
-    };
+      const publicKeyOptions: PublicKeyCredentialRequestOptions = {
+        challenge: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 0]),
+        timeout: 60000,
+        userVerification: 'preferred'
+      };
 
-    if (allowCredentialsList.length > 0) {
-      publicKeyOptions.allowCredentials = allowCredentialsList;
-    }
+      if (allowCredentialsList.length > 0) {
+        publicKeyOptions.allowCredentials = allowCredentialsList;
+      }
 
-    // 4. Trigger WebAuthn Prompt
-    const credential = await navigator.credentials.get({
-      publicKey: publicKeyOptions
-    }) as PublicKeyCredential;
+      const credential = await navigator.credentials.get({
+        publicKey: publicKeyOptions
+      }) as PublicKeyCredential;
 
-    if (credential) {
-      const matchedEmployee = enrolledEmployees.find(e => e.biometricPublicKey === credential.id);
+      if (credential) {
+        const matchedEmployee = enrolledEmployees.find(e => e.biometricPublicKey === credential.id);
 
-      if (matchedEmployee) {
-        this.posService.setLoggedInEmployee(matchedEmployee);
-        this.handleSuccessfulLogin(matchedEmployee);
+        if (matchedEmployee) {
+          this.posService.setLoggedInEmployee(matchedEmployee);
+          this.handleSuccessfulLogin(matchedEmployee);
+        } else {
+          this.errorMessage.set('Το αποτύπωμα δεν αντιστοιχεί σε κάποιον υπάλληλο.');
+        }
+      }
+    } catch (err: any) {
+      console.error('Biometric Login Error:', err);
+      if (err.name === 'NotAllowedError') {
+        this.errorMessage.set('Ακυρώθηκε η επαλήθευση ή έληξε ο χρόνος.');
       } else {
-        this.errorMessage.set('Το αποτύπωμα δεν αντιστοιχεί σε κάποιον υπάλληλο.');
+        this.errorMessage.set(`Σφάλμα βιομετρικών: ${err.message || 'Αποτυχία'}`);
       }
-    }
-  } catch (err: any) {
-    console.error('Biometric Login Error:', err);
-    if (err.name === 'NotAllowedError') {
-      this.errorMessage.set('Ακυρώθηκε η επαλήθευση ή έληξε ο χρόνος.');
-    } else {
-      this.errorMessage.set(`Σφάλμα βιομετρικών: ${err.message || 'Αποτυχία'}`);
     }
   }
-}
+
+  private isKitchenOnlyRole(role?: string): boolean {
+    if (!role) return false;
+    const r = role.toUpperCase();
+    return ['BARMAN', 'BARISTA', 'CHEF', 'KITCHEN'].includes(r);
+  }
 
   private handleSuccessfulLogin(emp: Employee): void {
+
+    this.autoLogoutService.startMonitoring();
+    this.autoLogoutService.resetTimer();
+    // 👈 1. If user is Barman, Chef, Barista, or Kitchen: Auto-start with 0 float and skip setup screen!
+    if (this.isKitchenOnlyRole(emp.role)) {
+      const activeShift = this.posService.getEmployeeActiveShift(emp.id);
+      if (!activeShift) {
+        this.posService.clockInShift('Έναρξη βάρδιας μέσω τερματικού (Κουζίνα/Bar)');
+        this.posService.openWaiterVault(0);
+
+        // 👈 Reset timer after starting shift float setup
+    this.autoLogoutService.startMonitoring();
+    this.autoLogoutService.resetTimer();
+
+    const emp = this.posService.currentEmployee();
+    if (emp) {
+      this.redirectByRole(emp.role);
+    } else {
+      this.router.navigate(['/floor-plan']);
+    }
+    }
+      this.redirectByRole(emp.role);
+      return;
+    }
+
+    // 👈 2. For Waiters & Managers: Prompt for float if no active shift
     const activeShift = this.posService.getEmployeeActiveShift(emp.id);
     if (!activeShift) {
       this.startingFloat = 50;
@@ -281,6 +307,7 @@ public async loginWithBiometrics(): Promise<void> {
 
   public startShiftAndVault(): void {
     const floatAmount = Number(this.startingFloat) >= 0 ? Number(this.startingFloat) : 50;
+    
     this.posService.clockInShift('Έναρξη βάρδιας μέσω τερματικού');
     this.posService.openWaiterVault(floatAmount);
     
@@ -293,8 +320,7 @@ public async loginWithBiometrics(): Promise<void> {
   }
 
   private redirectByRole(role?: string): void {
-    const r = (role || '').toUpperCase();
-    if (r === 'KITCHEN' || r === 'BARISTA') {
+    if (this.isKitchenOnlyRole(role)) {
       this.router.navigate(['/kitchen']);
     } else {
       this.router.navigate(['/floor-plan']);

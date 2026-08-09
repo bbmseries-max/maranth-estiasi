@@ -1,9 +1,10 @@
 import { Component, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { VaultClosureModalComponent } from '../staff/components/vault-closure-modal/vault-closure-modal.component';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
-import { RestaurantTable } from '../../core/models/restaurant-pos.models';
+import { RestaurantTable, WaiterVaultSession } from '../../core/models/restaurant-pos.models';
 
 export type TableVisualStatus = 'FREE' | 'PENDING' | 'PREPARING' | 'READY_TO_SERVE' | 'BILL_PRINTED';
 
@@ -11,7 +12,7 @@ export type TableVisualStatus = 'FREE' | 'PENDING' | 'PREPARING' | 'READY_TO_SER
   selector: 'app-floor-plan',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, VaultClosureModalComponent],
   template: `
     <div class="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
       
@@ -153,17 +154,62 @@ export type TableVisualStatus = 'FREE' | 'PENDING' | 'PREPARING' | 'READY_TO_SER
         </div>
       </main>
 
+      <!-- WAITER VAULT SELECTION MODAL FOR MANAGER -->
+      @if (selectingVaultForSettlement(); as target) {
+        <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl flex flex-col gap-4">
+            
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div>
+                <h3 class="text-base font-black text-white m-0">👛 Επιλογή Ταμείου Σερβιτόρου</h3>
+                <span class="text-xs text-amber-400">Πίστωση πληρωμής {{ target.method }}</span>
+              </div>
+              <button (click)="selectingVaultForSettlement.set(null)" class="text-slate-400 hover:text-white text-xl cursor-pointer">✕</button>
+            </div>
+
+            <div class="flex flex-col gap-2.5">
+              @for (vault of posService.activeVaultSessions(); track vault.id) {
+                <button (click)="confirmVaultSelection(vault.id)"
+                        class="p-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/50 flex items-center justify-between transition-all cursor-pointer text-left">
+                  <div class="flex items-center gap-2.5">
+                    <span class="w-8 h-8 rounded-full bg-amber-500/20 text-amber-400 font-black text-xs flex items-center justify-center">
+                      👤
+                    </span>
+                    <div>
+                      <span class="font-bold text-white text-xs block">{{ vault.waiterName }}</span>
+                      <span class="text-[10px] text-slate-400">Έναρξη: {{ vault.openedAt | date:'shortTime' }}</span>
+                    </div>
+                  </div>
+                  <span class="text-xs font-black text-emerald-400">€{{ vault.cashCollected.toFixed(2) }}</span>
+                </button>
+              }
+            </div>
+
+          </div>
+        </div>
+      }
+
+      <!-- SHIFT / VAULT CLOSURE MODAL -->
+@if (closingVault(); as vault) {
+  <app-vault-closure-modal
+    [vault]="vault"
+    (cancel)="closingVault.set(null)"
+    (completeShiftClose)="handleShiftClosure($event)">
+  </app-vault-closure-modal>
+}
+
     </div>
   `
 })
 export class FloorPlanComponent {
   public posService = inject(RestaurantPosService);
+  public closingVault = signal<WaiterVaultSession | null>(null);
   public router = inject(Router);
 
   public selectedZone = signal<string>('ALL');
+  public selectingVaultForSettlement = signal<{ tableId: string; method: 'CASH' | 'CARD' } | null>(null);
 
   public filteredTables = computed(() => {
-    // Exclude takeaway virtual table from table grid so Takeaway is only opened via top button
     const all = this.posService.tables().filter(t => t.id !== 'takeaway-counter' && t.zone !== 'Takeaway');
     const zone = this.selectedZone();
 
@@ -192,6 +238,30 @@ export class FloorPlanComponent {
       };
     }
     this.router.navigate(['/order', takeawayTable.id]);
+  }
+
+  public handleManagerSettlement(tableId: string, method: 'CASH' | 'CARD'): void {
+    const activeVaults = this.posService.activeVaultSessions();
+
+    if (activeVaults.length === 0) {
+      alert('Δεν υπάρχει ενεργό ταμείο σερβιτόρου.');
+      return;
+    }
+
+    if (activeVaults.length === 1) {
+      this.posService.settleTablePayment(tableId, method, activeVaults[0].id);
+      return;
+    }
+
+    this.selectingVaultForSettlement.set({ tableId, method });
+  }
+
+  public confirmVaultSelection(vaultId: string): void {
+    const target = this.selectingVaultForSettlement();
+    if (target) {
+      this.posService.settleTablePayment(target.tableId, target.method, vaultId);
+      this.selectingVaultForSettlement.set(null);
+    }
   }
 
   public isTableReady(table: RestaurantTable): boolean {
@@ -242,4 +312,95 @@ export class FloorPlanComponent {
         return 'border-slate-800 hover:border-emerald-500/50';
     }
   }
+
+  // --- OPTION 1 STRICT PAYMENT CHECK ---
+  // --- OPTION 1 STRICT PAYMENT CHECK ---
+  public processPayment(tableId: string, method: 'CASH' | 'CARD'): void {
+    const table = this.posService.tables().find(t => t.id === tableId);
+    const activeOrder = table?.activeOrder;
+
+    // 1. STRICT PREVENTION: Check for unsent items (items with 'PENDING' status)
+    if (activeOrder && activeOrder.items) {
+      const unsentItems = activeOrder.items.filter(
+        item => item.status === 'PENDING'
+      );
+
+      if (unsentItems.length > 0) {
+        alert(
+          `⚠️ Υπάρχουν ${unsentItems.length} προϊόντα που δεν έχουν σταλεί στην κουζίνα!\n\nΠαρακαλώ στείλτε την παραγγελία στην κουζίνα ή διαγράψτε τα εκκρεμή προϊόντα πριν την εξόφληση.`
+        );
+        return; // Stop settlement
+      }
+    }
+
+    // 2. Manager vs Waiter Vault Routing
+    const currentEmp = this.posService.currentEmployee();
+    const myVault = this.posService.activeVaultSession();
+    const activeVaults = this.posService.activeVaultSessions();
+
+    if (!myVault && currentEmp?.role === 'MANAGER' && activeVaults.length > 0) {
+      const selectedVaultId = this.promptSelectActiveWaiterVault(activeVaults);
+      if (selectedVaultId) {
+        this.posService.settleTablePayment(tableId, method, selectedVaultId);
+      }
+      return;
+    }
+
+    // 3. Normal settlement
+    this.posService.settleTablePayment(tableId, method);
+  }
+
+  private promptSelectActiveWaiterVault(activeVaults: WaiterVaultSession[]): string | null {
+    if (!activeVaults || activeVaults.length === 0) {
+      alert('Δεν υπάρχει κανένα ενεργό ταμείο σερβιτόρου αυτή τη στιγμή.');
+      return null;
+    }
+
+    if (activeVaults.length === 1) {
+      return activeVaults[0].id;
+    }
+
+    const vaultListText = activeVaults
+      .map((v, index) => `${index + 1}. ${v.waiterName} (Μετρητά: €${v.cashCollected.toFixed(2)})`)
+      .join('\n');
+
+    const input = prompt(
+      `Επιλέξτε Ταμείο Σερβιτόρου για την πίστωση της πληρωμής:\n\n${vaultListText}\n\nΠληκτρολογήστε τον αριθμό (1-${activeVaults.length}):`
+    );
+
+    if (input !== null) {
+      const selectedIndex = parseInt(input.trim(), 10) - 1;
+      if (!isNaN(selectedIndex) && activeVaults[selectedIndex]) {
+        return activeVaults[selectedIndex].id;
+      }
+    }
+
+    return null;
+  }
+
+  // Trigger method (e.g. from a header button or vault selector)
+public openVaultClosure(vault: WaiterVaultSession): void {
+  this.closingVault.set(vault);
+}
+
+// Complete the closure via POS service
+public handleShiftClosure(event: { vaultId: string; countedCash: number; discrepancy: number }): void {
+  const currentVault = this.closingVault();
+
+  if (currentVault) {
+    // 1. Create a complete WaiterVaultSession object with updated status
+    const updatedVault: WaiterVaultSession = {
+      ...currentVault,
+      status: 'CLOSED',
+      closedAt: new Date().toISOString()
+    };
+
+    // 2. Pass the full WaiterVaultSession object to your service
+    this.posService.closeWaiterVaultSession(updatedVault);
+  }
+
+  // 3. Close the modal
+  this.closingVault.set(null);
+}
+
 }

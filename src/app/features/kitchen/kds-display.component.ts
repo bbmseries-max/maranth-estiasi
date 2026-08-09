@@ -123,6 +123,26 @@ interface KitchenTicket {
                         ↳ Request: "{{ item.itemNotes }}"
                       </div>
                     }
+
+                    @if (activeVoidAlerts().length > 0) {
+  <div class="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-full max-w-lg px-4">
+    @for (alert of activeVoidAlerts(); track alert.id) {
+      <div class="bg-red-600 text-white p-4 rounded-2xl shadow-2xl border-2 border-red-400 animate-pulse flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">🚫</span>
+          <div>
+            <h4 class="font-black text-sm uppercase m-0">ΑΚΥΡΩΣΗ - Τραπέζι #{{ alert.tableNumber }}</h4>
+            <p class="text-xs font-bold text-red-100 m-0">{{ alert.itemName }} {{ alert.reason ? '(' + alert.reason + ')' : '' }}</p>
+          </div>
+        </div>
+        <button (click)="acknowledgeVoid(alert.id)" 
+                class="px-3 py-1.5 bg-white text-red-700 font-black text-xs rounded-xl hover:bg-red-50 transition-all cursor-pointer">
+          OK / Ελήφθη
+        </button>
+      </div>
+    }
+  </div>
+                    }
                   </div>
                 }
               </div>
@@ -272,4 +292,23 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
   public completeEntireTicket(ticket: KitchenTicket): void {
     this.posService.completeKitchenTicket(ticket.orderId, ticket.tableId);
   }
+
+  // Add to KitchenDisplayComponent state:
+public activeVoidAlerts = signal<Array<{ id: string; tableNumber: number; itemName: string; reason?: string }>>([]);
+
+// 1. Play audio chime and trigger pulsing alert when order is voided
+public handleVoidNotification(voidData: { id: string; tableNumber: number; itemName: string; reason?: string }): void {
+  // Sound alert
+  const audio = new Audio('assets/sounds/void-alert.mp3');
+  audio.play().catch(() => /* Autoplay policy handler */ {});
+
+  // Add to active alerts
+  this.activeVoidAlerts.update(alerts => [voidData, ...alerts]);
+}
+
+// 2. Kitchen Staff Acknowledgment (Clears the alert)
+public acknowledgeVoid(alertId: string): void {
+  this.activeVoidAlerts.update(alerts => alerts.filter(a => a.id !== alertId));
+}
+
 }

@@ -1,5 +1,6 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule, SlicePipe } from '@angular/common';
+import { AutoLogoutService } from './core/services/auto-logout.service';
 import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 import { RestaurantPosService } from './core/services/restaurant-pos.service';
 import { EmployeeRole } from './core/models/restaurant-pos.models';
@@ -11,6 +12,14 @@ import { EmployeeRole } from './core/models/restaurant-pos.models';
   templateUrl: './app.component.html'
 })
 export class AppComponent {
+private autoLogoutService = inject(AutoLogoutService);
+
+  ngOnInit(): void {
+    // Start bulletproof inactivity monitoring globally
+    this.autoLogoutService.startMonitoring();
+  }
+
+
   public posService = inject(RestaurantPosService);
   public isBellDrawerOpen = signal<boolean>(false);
 
@@ -23,7 +32,8 @@ export class AppComponent {
   public canAccessKitchen(role?: string): boolean {
     if (!role) return false;
     const r = role.toUpperCase();
-    return ['MANAGER', 'ADMIN', 'OWNER', 'BARISTA', 'KITCHEN'].includes(r);
+    // 👈 Added CHEF and BARMAN here
+    return ['MANAGER', 'ADMIN', 'OWNER', 'BARISTA', 'KITCHEN', 'CHEF', 'BARMAN'].includes(r);
   }
 
   public canAccessManagement(role?: string): boolean {
@@ -35,7 +45,8 @@ export class AppComponent {
   public isKitchenOnly(role?: string): boolean {
     if (!role) return false;
     const r = role.toUpperCase();
-    return r === 'BARISTA' || r === 'KITCHEN';
+    // 👈 Added CHEF and BARMAN here
+    return ['BARISTA', 'KITCHEN', 'CHEF', 'BARMAN'].includes(r);
   }
 
   public getRoleBadgeLabel(role?: string): string {
@@ -47,8 +58,10 @@ export class AppComponent {
       case 'OWNER': return 'Manager';
       case 'WAITER':
       case 'HEAD_WAITER': return 'Σερβιτόρος';
-      case 'BARISTA': return 'Barista';
-      case 'KITCHEN': return 'Κουζίνα';
+      case 'BARISTA':
+      case 'BARMAN': return 'Barista';
+      case 'KITCHEN':
+      case 'CHEF': return 'Κουζίνα';
       default: return role;
     }
   }

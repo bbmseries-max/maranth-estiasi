@@ -1,0 +1,577 @@
+import { Injectable, signal, computed, inject } from '@angular/core';
+import { Router } from '@angular/router';
+import { 
+  Firestore, 
+  collection, 
+  doc, 
+  setDoc, 
+  deleteDoc, 
+  onSnapshot, 
+  deleteField, 
+  Timestamp 
+} from 'firebase/firestore';
+
+import { 
+  Table, 
+  ActiveOrder, 
+  TableOrderItem, 
+  ItemPreparationStatus, 
+  Product, 
+  OrderModifier, 
+  SaleRecord, 
+  ReadyNotification, 
+  Employee 
+} from '../models/restaurant-pos.models';
+
+function cleanUndefined(obj: any): any {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(cleanUndefined);
+  const copy: any = {};
+  for (const key of Object.keys(obj)) {
+    if (obj[key] !== undefined) {
+      copy[key] = cleanUndefined(obj[key]);
+    }
+  }
+  return copy;
+}
+
+const INITIAL_TABLES: Table[] = [
+  { id: 't1', number: 1, tableNumber: 1, seats: 4, section: 'INDOOR', zone: 'Σάλα', status: 'FREE', currentTotal: 0 },
+  { id: 't2', number: 2, tableNumber: 2, seats: 2, section: 'INDOOR', zone: 'Σάλα', status: 'FREE', currentTotal: 0 },
+  { id: 't3', number: 3, tableNumber: 3, seats: 6, section: 'INDOOR', zone: 'Σάλα', status: 'FREE', currentTotal: 0 },
+  { id: 't4', number: 4, tableNumber: 4, seats: 4, section: 'OUTDOOR', zone: 'Αυλή', status: 'FREE', currentTotal: 0 },
+  { id: 't5', number: 5, tableNumber: 5, seats: 4, section: 'OUTDOOR', zone: 'Αυλή', status: 'FREE', currentTotal: 0 },
+  { id: 't6', number: 6, tableNumber: 6, seats: 2, section: 'BAR', zone: 'Bar', status: 'FREE', currentTotal: 0 },
+  { id: 'takeaway-counter', number: 99, tableNumber: 99, seats: 1, section: 'TAKEAWAY', zone: 'Παραλαβή', status: 'FREE', currentTotal: 0 }
+];
+
+@Injectable({
+  providedIn: 'root'
+})
+export class TableOrderService {
+  private router = inject(Router);
+  private db: Firestore | null = null;
+
+  // Signals
+  public tables = signal<Table[]>([]);
+  public activeOrders = signal<ActiveOrder[]>([]);
+  public unreadReadyNotifications = signal<ReadyNotification[]>([]);
+
+  // Internal Tracking Maps
+  private knownItemStatusMap = new Map<string, ItemPreparationStatus>();
+  private isInitialTablesSync = true;
+
+  // Computations
+  public occupiedTables = computed(() => 
+    this.tables().filter(t => t.status === 'OCCUPIED' || t.status === 'BILL_PRINTED')
+  );
+
+  public totalLiveFloorRevenue = computed(() => 
+    this.tables().reduce((acc, t) => {
+      const isOccupied = t.status === 'OCCUPIED' || t.status === 'BILL_PRINTED';
+      const orderTotal = t.activeOrder?.grandTotal || t.currentTotal || 0;
+      return acc + (isOccupied ? orderTotal : 0);
+    }, 0)
+  );
+
+  /**
+   * Initialize Firestore listeners for tables and active floor orders
+   */
+  public initFirestoreSync(dbInstance: Firestore | null, getCurrentEmployeeFn: () => Employee | null): void {
+    if (!dbInstance) return;
+    this.db = dbInstance;
+
+    onSnapshot(collection(this.db, 'tables'), (snap) => {
+      const cloudTableMap = new Map<string, Table>();
+      const newlyServedItems: { tableId: string; tableNumber: number; zone: string; itemSummary: string }[] = [];
+      const extractedActiveOrders: ActiveOrder[] = [];
+
+      if (!snap.empty) {
+        snap.forEach(docSnap => {
+          const rawTable = docSnap.data() as any;
+          const isFree = !rawTable.status || rawTable.status === 'FREE' || rawTable.status === 'AVAILABLE';
+
+          const t: Table = {
+            ...rawTable,
+            status: isFree ? 'FREE' : rawTable.status,
+            currentTotal: isFree ? 0 : (rawTable.currentTotal || 0),
+            activeOrder: (isFree || !rawTable.activeOrder) ? undefined : rawTable.activeOrder,
+            activeOrderId: (isFree || !rawTable.activeOrderId) ? undefined : rawTable.activeOrderId,
+            waiterId: isFree ? undefined : rawTable.waiterId,
+            waiterName: isFree ? undefined : rawTable.waiterName,
+            assignedWaiterId: isFree ? undefined : rawTable.assignedWaiterId,
+            assignedWaiterName: isFree ? undefined : rawTable.assignedWaiterName
+          };
+          cloudTableMap.set(t.id, t);
+
+          if (t.activeOrder) {
+            extractedActiveOrders.push(t.activeOrder);
+          }
+
+          if (rawTable.activeOrder && rawTable.activeOrder.items) {
+            for (const item of rawTable.activeOrder.items) {
+              const prevStatus = this.knownItemStatusMap.get(item.id);
+              this.knownItemStatusMap.set(item.id, item.status);
+
+              if (!this.isInitialTablesSync && prevStatus && prevStatus !== 'SERVED' && item.status === 'SERVED') {
+                newlyServedItems.push({
+                  tableId: rawTable.id,
+                  tableNumber: rawTable.number || rawTable.tableNumber || 0,
+                  zone: rawTable.zone || rawTable.section || 'Σάλα',
+                  itemSummary: `${item.quantity}x ${item.productName || item.name || 'Προϊόν'}`
+                });
+              }
+            }
+          }
+        });
+      }
+
+      const mergedList = INITIAL_TABLES.map(initTable => {
+        const cloudTable = cloudTableMap.get(initTable.id);
+        if (cloudTable) {
+          const isFree = cloudTable.status === 'FREE';
+          return {
+            ...initTable,
+            ...cloudTable,
+            status: isFree ? 'FREE' : cloudTable.status,
+            currentTotal: isFree ? 0 : (cloudTable.currentTotal || 0),
+            activeOrder: isFree ? undefined : cloudTable.activeOrder
+          };
+        }
+        return initTable;
+      });
+
+      cloudTableMap.forEach((cloudTable, id) => {
+        if (!mergedList.some(t => t.id === id)) {
+          const isFree = cloudTable.status === 'FREE';
+          mergedList.push({
+            ...cloudTable,
+            status: isFree ? 'FREE' : cloudTable.status,
+            currentTotal: isFree ? 0 : (cloudTable.currentTotal || 0),
+            activeOrder: isFree ? undefined : cloudTable.activeOrder
+          });
+        }
+      });
+
+      mergedList.sort((a, b) => (a.number || a.tableNumber || 0) - (b.number || b.tableNumber || 0));
+      this.tables.set(mergedList);
+      this.activeOrders.set(extractedActiveOrders);
+
+      if (this.isInitialTablesSync) {
+        this.isInitialTablesSync = false;
+      } else if (newlyServedItems.length > 0 && getCurrentEmployeeFn()) {
+        for (const notif of newlyServedItems) {
+          this.addReadyNotification(notif);
+        }
+      }
+    }, (err) => console.warn('Tables sync warning:', err));
+  }
+
+// --- NOTIFICATIONS ---
+
+  private addReadyNotification(notif: { tableId: string; tableNumber: number; zone: string; itemSummary: string }): void {
+    const fullNotif: ReadyNotification = {
+      ...notif,
+      id: `NOTIF-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      readyAt: new Date().toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' })
+    };
+
+    // 1. Add notification to active list
+    this.unreadReadyNotifications.update(list => [fullNotif, ...list]);
+
+    // 2. Auto-dismiss automatically after 2 seconds (2000ms)
+    setTimeout(() => {
+      this.dismissNotification(fullNotif.id);
+    }, 2000);
+  }
+
+  public clearAllNotifications(): void {
+    this.unreadReadyNotifications.set([]);
+  }
+
+  public dismissNotification(idOrIndex: string | number): void {
+    this.unreadReadyNotifications.update(list =>
+      list.filter((item, index) => item.id !== idOrIndex && index !== idOrIndex)
+    );
+  }
+
+  // --- FLOOR PLAN MANAGEMENT ---
+
+  public addTable(data: { number: number; seats?: number; section?: string; zone?: string }): { success: boolean; message: string; table?: Table } {
+    const num = Number(data.number);
+    if (!num || num <= 0) {
+      return { success: false, message: 'Ο αριθμός τραπεζιού πρέπει να είναι θετικός ακέραιος.' };
+    }
+
+    const existing = this.tables().find(t => (t.number === num || t.tableNumber === num) && t.id !== 'takeaway-counter');
+    if (existing) {
+      return { success: false, message: `Υπάρχει ήδη τραπέζι με αριθμό #${num}!` };
+    }
+
+    const newTable: Table = {
+      id: `t_${Date.now()}`,
+      number: num,
+      tableNumber: num,
+      name: `Τραπέζι ${num}`,
+      seats: data.seats || 4,
+      capacity: data.seats || 4,
+      section: (data.section || 'INDOOR') as any,
+      zone: data.zone || (data.section === 'OUTDOOR' ? 'Αυλή' : data.section === 'BAR' ? 'Bar' : 'Σάλα'),
+      status: 'FREE',
+      currentTotal: 0
+    };
+
+    const updated = [...this.tables(), newTable].sort((a, b) => (a.number || 0) - (b.number || 0));
+    this.tables.set(updated);
+
+    if (this.db) {
+      setDoc(doc(this.db, 'tables', newTable.id), cleanUndefined(newTable)).catch(() => {});
+    }
+
+    return { success: true, message: 'Το τραπέζι δημιουργήθηκε επιτυχώς', table: newTable };
+  }
+
+  public updateTable(tableId: string, data: Partial<Table>): void {
+    const existing = this.tables().find(t => t.id === tableId);
+    if (!existing) return;
+
+    const num = data.number ?? data.tableNumber ?? existing.number ?? existing.tableNumber;
+    const seats = data.seats ?? data.capacity ?? existing.seats ?? existing.capacity;
+
+    const updatedTable: Table = {
+      ...existing,
+      ...data,
+      number: num,
+      tableNumber: num,
+      name: data.name || `Τραπέζι ${num}`,
+      seats: seats,
+      capacity: seats
+    };
+
+    const updatedList = this.tables().map(t => t.id === tableId ? updatedTable : t);
+    this.tables.set(updatedList);
+
+    if (this.db) {
+      setDoc(doc(this.db, 'tables', tableId), cleanUndefined(updatedTable), { merge: true }).catch(() => {});
+    }
+  }
+
+  public deleteTable(tableId: string): { success: boolean; message: string } {
+    const target = this.tables().find(t => t.id === tableId);
+    if (!target) return { success: false, message: 'Το τραπέζι δεν βρέθηκε.' };
+
+    if (target.status === 'OCCUPIED' || target.status === 'BILL_PRINTED') {
+      return { success: false, message: 'Δεν μπορείτε να διαγράψετε τραπέζι με ενεργή παραγγελία!' };
+    }
+
+    const updated = this.tables().filter(t => t.id !== tableId);
+    this.tables.set(updated);
+
+    if (this.db) {
+      deleteDoc(doc(this.db, 'tables', tableId)).catch(() => {});
+    }
+
+    return { success: true, message: 'Το τραπέζι διαγράφηκε επιτυχώς.' };
+  }
+
+  // --- ORDER MANAGEMENT ---
+
+  public addOrderItemToTable(tableId: string, product: Product, modifiers: OrderModifier[] = [], notes: string = '', waiterEmp?: Employee | null): void {
+    const waiter = waiterEmp || { id: 'WAITER_1', name: 'Σερβιτόρος' };
+    const extraCost = modifiers.reduce((acc, m) => acc + (m.priceExtra || 0), 0);
+    const finalPrice = product.price + extraCost;
+
+    const table = this.tables().find(t => t.id === tableId);
+    if (!table) return;
+
+    const existingOrder = table.activeOrder || {
+      orderId: `ORD-${Date.now()}`,
+      openedAt: new Date().toISOString(),
+      items: [],
+      subtotalNet: 0,
+      totalTax: 0,
+      grandTotal: 0
+    };
+
+    const newItem: TableOrderItem = {
+      id: `ITEM-${Date.now()}`,
+      productId: product.id,
+      productName: product.name,
+      unitPrice: product.price,
+      quantity: 1,
+      taxRate: product.taxRate || 13,
+      modifiers,
+      finalItemPrice: finalPrice,
+      itemNotes: notes,
+      orderedByWaiterId: waiter.id,
+      orderedByWaiterName: waiter.name,
+      timestamp: new Date().toISOString(),
+      status: 'PENDING'
+    };
+
+    const updatedItems = [...existingOrder.items, newItem];
+    const activeItems = updatedItems.filter(i => i.status !== 'VOIDED');
+    const grandTotal = activeItems.reduce((acc, i) => acc + (i.finalItemPrice * i.quantity), 0);
+    const subtotalNet = grandTotal / 1.13;
+    const totalTax = grandTotal - subtotalNet;
+
+    const updatedT: Table = {
+      ...table,
+      status: 'OCCUPIED',
+      waiterId: waiter.id,
+      assignedWaiterId: waiter.id,
+      waiterName: waiter.name,
+      assignedWaiterName: waiter.name,
+      currentTotal: grandTotal,
+      activeOrder: { ...existingOrder, items: updatedItems, subtotalNet, totalTax, grandTotal }
+    };
+
+    const updatedTables = this.tables().map(t => t.id === tableId ? updatedT : t);
+    this.tables.set(updatedTables);
+
+    if (this.db) {
+      setDoc(doc(this.db, 'tables', tableId), cleanUndefined(updatedT)).catch(() => {});
+    }
+  }
+
+  public async updateTableOrderItemQuantity(tableId: string, itemId: string, delta: number): Promise<void> {
+    const table = this.tables().find(t => t.id === tableId);
+    if (!table || !table.activeOrder) return;
+
+    const existingItems = table.activeOrder.items;
+    const targetItem = existingItems.find(i => i.id === itemId);
+    if (!targetItem) return;
+
+    const newQty = targetItem.quantity + delta;
+
+    let updatedItems: TableOrderItem[];
+    if (newQty <= 0) {
+      if (targetItem.status === 'PENDING') {
+        updatedItems = existingItems.filter(i => i.id !== itemId);
+      } else {
+        updatedItems = existingItems.map(i => i.id === itemId ? { ...i, status: 'VOIDED' as ItemPreparationStatus } : i);
+      }
+    } else {
+      updatedItems = existingItems.map(i => i.id === itemId ? { ...i, quantity: newQty } : i);
+    }
+
+    const activeItems = updatedItems.filter(i => i.status !== 'VOIDED');
+    const grandTotal = activeItems.reduce((acc, i) => acc + (i.finalItemPrice * i.quantity), 0);
+    const subtotalNet = grandTotal / 1.13;
+    const totalTax = grandTotal - subtotalNet;
+
+    const updatedTable: Table = {
+      ...table,
+      currentTotal: grandTotal,
+      activeOrder: {
+        ...table.activeOrder,
+        items: updatedItems,
+        subtotalNet,
+        totalTax,
+        grandTotal
+      }
+    };
+
+    const updatedTables = this.tables().map(t => t.id === tableId ? updatedTable : t);
+    this.tables.set(updatedTables);
+
+    if (this.db) {
+      try {
+        await setDoc(doc(this.db, 'tables', tableId), cleanUndefined(updatedTable));
+      } catch (e) {}
+    }
+  }
+
+  public async voidTableOrderItem(tableId: string, itemId: string, reason: string = 'Ακύρωση από σερβιτόρο'): Promise<void> {
+    const table = this.tables().find(t => t.id === tableId);
+    if (!table || !table.activeOrder) return;
+
+    const targetItem = table.activeOrder.items.find(i => i.id === itemId);
+    if (!targetItem) return;
+
+    let updatedItems: TableOrderItem[];
+    if (targetItem.status === 'PENDING') {
+      updatedItems = table.activeOrder.items.filter(i => i.id !== itemId);
+    } else {
+      updatedItems = table.activeOrder.items.map(i => 
+        i.id === itemId ? { ...i, status: 'VOIDED' as ItemPreparationStatus } : i
+      );
+    }
+
+    const activeItems = updatedItems.filter(i => i.status !== 'VOIDED');
+    const grandTotal = activeItems.reduce((acc, i) => acc + (i.finalItemPrice * i.quantity), 0);
+    const subtotalNet = grandTotal / 1.13;
+    const totalTax = grandTotal - subtotalNet;
+
+    const updatedTable: Table = {
+      ...table,
+      currentTotal: grandTotal,
+      activeOrder: {
+        ...table.activeOrder,
+        items: updatedItems,
+        subtotalNet,
+        totalTax,
+        grandTotal
+      }
+    };
+
+    const updatedTables = this.tables().map(t => t.id === tableId ? updatedTable : t);
+    this.tables.set(updatedTables);
+
+    if (this.db) {
+      try {
+        await setDoc(doc(this.db, 'tables', tableId), cleanUndefined(updatedTable));
+      } catch (e) {}
+    }
+  }
+
+  public sendOrderToKitchen(tableId: string): void {
+    const table = this.tables().find(t => t.id === tableId);
+    if (!table || !table.activeOrder) return;
+
+    const updatedItems = table.activeOrder.items.map(i => 
+      i.status === 'PENDING' ? { ...i, status: 'SENT_TO_KITCHEN' as const } : i
+    );
+
+    const updatedT: Table = { ...table, status: 'OCCUPIED', activeOrder: { ...table.activeOrder, items: updatedItems } };
+    const updatedTables = this.tables().map(t => t.id === tableId ? updatedT : t);
+    this.tables.set(updatedTables);
+
+    if (this.db) {
+      setDoc(doc(this.db, 'tables', tableId), cleanUndefined(updatedT)).catch(() => {});
+    }
+  }
+
+  public async updateOrderItemStatus(orderId: string, itemId: string, newStatus: ItemPreparationStatus): Promise<void> {
+    const targetTable = this.tables().find(t => t.activeOrder?.orderId === orderId);
+    if (!targetTable || !targetTable.activeOrder) return;
+
+    const updatedItems = targetTable.activeOrder.items.map(item =>
+      item.id === itemId ? { ...item, status: newStatus } : item
+    );
+
+    const updatedTable: Table = {
+      ...targetTable,
+      activeOrder: {
+        ...targetTable.activeOrder,
+        items: updatedItems
+      }
+    };
+
+    const updatedTables = this.tables().map(t => t.id === targetTable.id ? updatedTable : t);
+    this.tables.set(updatedTables);
+
+    if (this.db) {
+      try {
+        await setDoc(doc(this.db, 'tables', targetTable.id), cleanUndefined(updatedTable), { merge: true });
+      } catch (e) {}
+    }
+  }
+
+  public bumpOrderItemStatus(tableId: string, itemId: string): void {
+    const table = this.tables().find(t => t.id === tableId);
+    if (!table || !table.activeOrder) return;
+
+    const updatedItems = table.activeOrder.items.map(item => {
+      if (item.id === itemId) {
+        let nextStatus: ItemPreparationStatus = 'PREPARING';
+        if (item.status === 'PREPARING') nextStatus = 'SERVED';
+        return { ...item, status: nextStatus };
+      }
+      return item;
+    });
+
+    const updatedT: Table = { ...table, activeOrder: { ...table.activeOrder, items: updatedItems } };
+    const updatedTables = this.tables().map(t => t.id === tableId ? updatedT : t);
+    this.tables.set(updatedTables);
+
+    if (this.db) {
+      setDoc(doc(this.db, 'tables', tableId), cleanUndefined(updatedT)).catch(() => {});
+    }
+  }
+
+  public async markTableBillPrinted(tableId: string): Promise<void> {
+    const table = this.tables().find(t => t.id === tableId);
+    if (!table) return;
+
+    const updatedT: Table = { ...table, status: 'BILL_PRINTED' };
+    const updated = this.tables().map(t => t.id === tableId ? updatedT : t);
+    this.tables.set(updated);
+
+    if (this.db) {
+      try {
+        await setDoc(doc(this.db, 'tables', tableId), {
+          status: 'BILL_PRINTED',
+          updatedAt: Timestamp.now()
+        }, { merge: true });
+      } catch (e) {}
+    }
+  }
+
+  public async settleTablePayment(
+    tableId: string, 
+    paymentMethod: 'CASH' | 'CARD' | 'DEBT', 
+    currentEmp: Employee | null, 
+    onPaymentSuccessFn: (saleRecord: SaleRecord) => void
+  ): Promise<void> {
+    const table = this.tables().find(t => t.id === tableId);
+    if (!table) return;
+
+    const grandTotal = table.activeOrder?.grandTotal || table.currentTotal || 0;
+    const tableNum = table.number || table.tableNumber || 0;
+    const waiter = currentEmp || { id: 'WAITER', name: 'Σερβιτόρος' };
+
+    const saleRecord: SaleRecord = {
+      id: `SALE-${Date.now()}`,
+      orderId: table.activeOrder?.orderId || `ORD-${Date.now()}`,
+      tableId: table.id,
+      tableNumber: tableNum,
+      waiterId: waiter.id,
+      waiterName: waiter.name,
+      paymentMethod,
+      items: table.activeOrder?.items || [],
+      subtotalNet: table.activeOrder?.subtotalNet || (grandTotal / 1.13),
+      totalTax: table.activeOrder?.totalTax || (grandTotal - (grandTotal / 1.13)),
+      grandTotal,
+      timestamp: new Date().toISOString()
+    };
+
+    if (this.db) {
+      try {
+        await setDoc(doc(this.db, 'sales', saleRecord.id), cleanUndefined(saleRecord));
+      } catch (e) {
+        console.warn('Error writing sale record:', e);
+      }
+    }
+
+    onPaymentSuccessFn(saleRecord);
+
+    const freedTable: Table = {
+      ...table,
+      status: 'FREE',
+      currentTotal: 0,
+      activeOrder: undefined,
+      activeOrderId: undefined,
+      waiterId: undefined,
+      assignedWaiterId: undefined,
+      waiterName: undefined,
+      assignedWaiterName: undefined
+    };
+
+    const updatedTables = this.tables().map(t => t.id === tableId ? freedTable : t);
+    this.tables.set(updatedTables);
+
+    if (this.db) {
+      try {
+        await setDoc(doc(this.db, 'tables', tableId), cleanUndefined({
+          ...freedTable,
+          activeOrder: deleteField(),
+          waiterId: deleteField(),
+          waiterName: deleteField()
+        }));
+      } catch (e) {}
+    }
+
+    this.router.navigate(['/floor-plan']);
+  }
+}

@@ -166,7 +166,7 @@ export interface WorkShiftLog {
   employeeName: string;
   clockInTime: string;
   clockOutTime?: string;
-  hourlyRateAtShift: number;
+  hourlyRateAtShift?: number;
   totalHoursWorked?: number;
   earnedAmount?: number;
   status: 'WORKING' | 'COMPLETED';
@@ -183,6 +183,7 @@ export interface WaiterVaultSession {
   startingFloat: number;
   cashCollected: number;
   cardCollected: number;
+  startingCash?: number;
   expectedCash?: number;
   cashHandedOver?: number;
   cashVariance?: number;

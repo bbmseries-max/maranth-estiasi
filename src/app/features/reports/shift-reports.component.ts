@@ -15,7 +15,7 @@ import {
   selector: 'app-shift-reports',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, RouterLink, DatePipe ],
+  imports: [CommonModule, FormsModule, RouterLink, DatePipe],
   template: `
     <div class="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
       
@@ -303,8 +303,8 @@ import {
             <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col gap-4">
               <div class="flex justify-between items-center border-b border-slate-800 pb-4">
                 <div>
-                  <h2 class="text-base font-black text-white uppercase tracking-wider m-0">👥 Βάρδιες & Live Ωρομίσθια Προσωπικού</h2>
-                  <span class="text-xs text-slate-400">Υπολογισμός πραγματικών ωρών εργασίας και εκτιμώμενου κόστους μισθοδοσίας</span>
+                  <h2 class="text-base font-black text-white uppercase tracking-wider m-0">👥 Βάρδιες & Live Ωρομίσθια Προσωπικού</h2>                  
+                  <span class="text-xs text-slate-400 block mt-0.5">Υπολογισμός πραγματικών ωρών εργασίας και εκτιμώμενου κόστους μισθοδοσίας</span>
                 </div>
               </div>
 
@@ -325,7 +325,7 @@ import {
                     @for (emp of posService.employees(); track emp.id) {
                       @let activeShift = posService.getEmployeeActiveShift(emp.id);
                       @let hours = calculateShiftHours(activeShift);
-                      @let wage = hours * emp.hourlyRate;
+                      @let wage = hours * (emp.hourlyRate || 0);
                       
                       <tr class="border-b border-slate-800/60 hover:bg-slate-800/40 transition-colors">
                         <td class="py-3 px-3 font-bold text-white flex items-center gap-2">
@@ -334,21 +334,21 @@ import {
                           </span>
                           <span>{{ emp.name }}</span>
                         </td>
-                        <td class="py-3 px-3 text-slate-400 font-medium">{{ emp.role }}</td>
+                        <td class="py-3 px-3 text-slate-400 font-medium">{{ posService.getRoleLabel(emp.role) }}</td>
                         <td class="py-3 px-3 text-amber-400 font-mono">
                           {{ activeShift ? (activeShift.clockInTime | date:'shortTime') : '-' }}
                         </td>
                         <td class="py-3 px-3 font-bold text-sky-400">
                           {{ activeShift ? (hours.toFixed(2) + 'h') : '-' }}
                         </td>
-                        <td class="py-3 px-3 font-bold text-slate-300">€{{ emp.hourlyRate.toFixed(2) }}</td>
+                        <td class="py-3 px-3 font-bold text-slate-300">€{{ (emp.hourlyRate || 0).toFixed(2) }}</td>
                         <td class="py-3 px-3 font-black text-emerald-400">
                           {{ activeShift ? ('€' + wage.toFixed(2)) : '-' }}
                         </td>
                         <td class="py-3 px-3">
                           <span class="px-2 py-0.5 rounded-full text-[10px] font-black border"
-                                [ngClass]="activeShift ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 animate-pulse' : 'bg-slate-800 text-slate-400 border-slate-700'">
-                            {{ activeShift ? '🟢 Στη Βάρδια' : '⚪ Εκτός' }}
+                                [ngClass]="activeShift ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 animate-pulse' : 'bg-red-500/20 text-red-400 border-red-500/40'">
+                            {{ activeShift ? '🟢 Στη Βάρδια' : '🔴 Εκτός' }}
                           </span>
                         </td>
                       </tr>
@@ -487,8 +487,6 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
 
   private timerInterval: any;
 
-  
-
   ngOnInit(): void {
     this.timerInterval = setInterval(() => {
       this.now.set(Date.now());
@@ -499,10 +497,20 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
     if (this.timerInterval) clearInterval(this.timerInterval);
   }
 
-  public calculateShiftHours(shift?: WorkShiftLog): number {
-    if (!shift || !shift.clockInTime) return 0;
-    const diffMs = this.now() - new Date(shift.clockInTime).getTime();
-    return Math.max(0, diffMs / 3600000);
+  public calculateShiftHours(activeShift: WorkShiftLog | undefined | null): number {
+    if (!activeShift || !activeShift.clockInTime) {
+      return 0;
+    }
+
+    const startMs = new Date(activeShift.clockInTime).getTime();
+    const endMs = activeShift.clockOutTime 
+      ? new Date(activeShift.clockOutTime).getTime() 
+      : Date.now();
+
+    const diffMs = endMs - startMs;
+    if (diffMs <= 0) return 0;
+
+    return diffMs / (1000 * 60 * 60);
   }
 
   public promptEditStartingFloat(vault: WaiterVaultSession): void {
@@ -524,31 +532,28 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
     const expected = vault.startingFloat + vault.cashCollected;
     const variance = this.actualHandedCash - expected;
 
+    // 1. Print Receipt
     this.printVaultReceipt(vault, this.actualHandedCash);
 
+    // 2. Log Audit Event
     this.posService.logAudit(
       'VAULT_CLOSED', 
       `Κλείσιμο ταμείου ${vault.waiterName}. Παραδόθηκαν: €${this.actualHandedCash.toFixed(2)} (Απόκλιση: €${variance.toFixed(2)})`
     );
 
-    if (this.posService.db) {
-      const closedVault: WaiterVaultSession = {
-        ...vault,
-        closedAt: new Date().toISOString(),
-        expectedCash: expected,
-        cashHandedOver: this.actualHandedCash,
-        cashVariance: variance,
-        status: 'CLOSED'
-      };
-      this.posService.allVaultSessions.update(list => 
-        list.map(v => v.id === vault.id ? closedVault : v)
-      );
-      this.posService.activeVaultSessions.update(list => list.filter(v => v.id !== vault.id));
-    }
+    // 3. Delegate Vault Close & Employee Clock-Out to POS Service
+    const closedVault: WaiterVaultSession = {
+      ...vault,
+      closedAt: new Date().toISOString(),
+      expectedCash: expected,
+      cashHandedOver: this.actualHandedCash,
+      cashVariance: variance,
+      status: 'CLOSED'
+    };
 
-    if (this.posService.activeVaultSession()?.id === vault.id) {
-      this.posService.activeVaultSession.set(null);
-    }
+    this.posService.closeWaiterVaultSession(closedVault);
+
+    // 4. Close Modal
     this.closingVault.set(null);
   }
 
@@ -580,7 +585,7 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
     this.printSnapshotZReport(snapshot);
   }
 
- public printSnapshotZReport(z: DailyZReportSnapshot): void {
+  public printSnapshotZReport(z: DailyZReportSnapshot): void {
     this.printerService.printZReport(z);
   }
 
@@ -601,5 +606,4 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
       default: return 'bg-slate-800 text-slate-300 border-slate-700';
     }
   }
-  
 }
