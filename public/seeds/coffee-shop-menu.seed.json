@@ -1,0 +1,188 @@
+{
+  "categories": [
+    {
+      "id": "cat-espresso-bar",
+      "name": "Espresso & Coffee",
+      "icon": "☕",
+      "sortOrder": 1,
+      "isActive": true
+    },
+    {
+      "id": "cat-cold-beverages",
+      "name": "Cold Drinks & Tea",
+      "icon": "🥤",
+      "sortOrder": 2,
+      "isActive": true
+    },
+    {
+      "id": "cat-sandwiches-bakery",
+      "name": "Sandwiches & Bakery",
+      "icon": "🥪",
+      "sortOrder": 3,
+      "isActive": true
+    },
+    {
+      "id": "cat-sweets-desserts",
+      "name": "Sweets & Waffles",
+      "icon": "🍰",
+      "sortOrder": 4,
+      "isActive": true
+    }
+  ],
+  "products": [
+    {
+      "id": "prod-freddo-espresso",
+      "name": "Freddo Espresso",
+      "categoryId": "cat-espresso-bar",
+      "price": 2.20,
+      "taxRate": 13,
+      "kitchenStation": "BAR",
+      "modifierGroupIds": ["mod-sweetness", "mod-coffee-beans", "mod-extra-shots"],
+      "isActive": true
+    },
+    {
+      "id": "prod-freddo-cappuccino",
+      "name": "Freddo Cappuccino",
+      "categoryId": "cat-espresso-bar",
+      "price": 2.50,
+      "taxRate": 13,
+      "kitchenStation": "BAR",
+      "modifierGroupIds": ["mod-sweetness", "mod-milk-type", "mod-extra-shots"],
+      "isActive": true
+    },
+    {
+      "id": "prod-espresso-single",
+      "name": "Espresso Single",
+      "categoryId": "cat-espresso-bar",
+      "price": 1.80,
+      "taxRate": 13,
+      "kitchenStation": "BAR",
+      "modifierGroupIds": ["mod-sweetness", "mod-coffee-beans"],
+      "isActive": true
+    },
+    {
+      "id": "prod-cappuccino-double",
+      "name": "Cappuccino Double",
+      "categoryId": "cat-espresso-bar",
+      "price": 2.80,
+      "taxRate": 13,
+      "kitchenStation": "BAR",
+      "modifierGroupIds": ["mod-sweetness", "mod-milk-type", "mod-extra-shots"],
+      "isActive": true
+    },
+    {
+      "id": "prod-fresh-orange-juice",
+      "name": "Fresh Orange Juice",
+      "categoryId": "cat-cold-beverages",
+      "price": 3.20,
+      "taxRate": 13,
+      "kitchenStation": "BAR",
+      "modifierGroupIds": [],
+      "isActive": true
+    },
+    {
+      "id": "prod-iced-tea-peach",
+      "name": "Iced Tea Peach 330ml",
+      "categoryId": "cat-cold-beverages",
+      "price": 2.50,
+      "taxRate": 13,
+      "kitchenStation": "BAR",
+      "modifierGroupIds": [],
+      "isActive": true
+    },
+    {
+      "id": "prod-club-sandwich",
+      "name": "Club Sandwich Special",
+      "categoryId": "cat-sandwiches-bakery",
+      "price": 6.50,
+      "taxRate": 13,
+      "kitchenStation": "KITCHEN",
+      "modifierGroupIds": ["mod-bread-type"],
+      "isActive": true
+    },
+    {
+      "id": "prod-toast-ham-cheese",
+      "name": "Toast Ham & Cheese",
+      "categoryId": "cat-sandwiches-bakery",
+      "price": 2.80,
+      "taxRate": 13,
+      "kitchenStation": "KITCHEN",
+      "modifierGroupIds": ["mod-bread-type"],
+      "isActive": true
+    },
+    {
+      "id": "prod-chocolate-waffle",
+      "name": "Chocolate & Biscuit Waffle",
+      "categoryId": "cat-sweets-desserts",
+      "price": 5.20,
+      "taxRate": 13,
+      "kitchenStation": "KITCHEN",
+      "modifierGroupIds": [],
+      "isActive": true
+    }
+  ],
+  "modifierGroups": [
+    {
+      "id": "mod-sweetness",
+      "name": "Sweetness Level",
+      "required": true,
+      "minSelections": 1,
+      "maxSelections": 1,
+      "options": [
+        { "id": "opt-sweet-no", "name": "Sketos (Unsweetened)", "priceExtra": 0.00 },
+        { "id": "opt-sweet-medium", "name": "Metrios (Medium)", "priceExtra": 0.00 },
+        { "id": "opt-sweet-full", "name": "Glykos (Sweet)", "priceExtra": 0.00 },
+        { "id": "opt-sweet-stevia", "name": "With Stevia", "priceExtra": 0.20 }
+      ]
+    },
+    {
+      "id": "mod-milk-type",
+      "name": "Milk Preference",
+      "required": true,
+      "minSelections": 1,
+      "maxSelections": 1,
+      "options": [
+        { "id": "opt-milk-whole", "name": "Whole Milk (3.5%)", "priceExtra": 0.00 },
+        { "id": "opt-milk-skim", "name": "Skim Milk (1.5%)", "priceExtra": 0.00 },
+        { "id": "opt-milk-oat", "name": "Oat Milk", "priceExtra": 0.50 },
+        { "id": "opt-milk-almond", "name": "Almond Milk", "priceExtra": 0.50 }
+      ]
+    },
+    {
+      "id": "mod-coffee-beans",
+      "name": "Coffee Blend / Origin",
+      "required": false,
+      "minSelections": 0,
+      "maxSelections": 1,
+      "options": [
+        { "id": "opt-bean-house", "name": "House Espresso Blend (100% Arabica)", "priceExtra": 0.00 },
+        { "id": "opt-bean-single", "name": "Single Origin Ethiopia", "priceExtra": 0.40 },
+        { "id": "opt-bean-dekaf", "name": "Decaf Espresso", "priceExtra": 0.00 }
+      ]
+    },
+    {
+      "id": "mod-extra-shots",
+      "name": "Extras & Add-ons",
+      "required": false,
+      "minSelections": 0,
+      "maxSelections": 3,
+      "options": [
+        { "id": "opt-extra-shot", "name": "Extra Espresso Shot", "priceExtra": 0.60 },
+        { "id": "opt-extra-syrup-vanilla", "name": "Vanilla Syrup", "priceExtra": 0.40 },
+        { "id": "opt-extra-syrup-caramel", "name": "Caramel Syrup", "priceExtra": 0.40 }
+      ]
+    },
+    {
+      "id": "mod-bread-type",
+      "name": "Bread Selection",
+      "required": true,
+      "minSelections": 1,
+      "maxSelections": 1,
+      "options": [
+        { "id": "opt-bread-white", "name": "Classic White Toast Bread", "priceExtra": 0.00 },
+        { "id": "opt-bread-wholewheat", "name": "Whole Wheat Bread", "priceExtra": 0.30 },
+        { "id": "opt-bread-brioche", "name": "Brioche Bread", "priceExtra": 0.50 }
+      ]
+    }
+  ]
+}

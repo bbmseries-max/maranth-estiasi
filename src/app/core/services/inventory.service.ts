@@ -1,3 +1,5 @@
+// src/app/core/services/inventory.service.ts
+
 import { Injectable, signal, computed, inject } from '@angular/core';
 import { 
   Firestore, 
@@ -5,18 +7,24 @@ import {
   doc, 
   setDoc, 
   deleteDoc, 
-  onSnapshot 
+  onSnapshot,
+  query,
+  where,
+  Unsubscribe
 } from 'firebase/firestore';
+import { TenantContextService } from './tenant-context.service';
 
+// Barrel imports
 import { 
   UnitOfMeasure, 
   GreekVatRate, 
   RawMaterial, 
   Category, 
   Product, 
+  ModifierGroup, 
   SpoilageLog, 
   Employee 
-} from '../models/restaurant-pos.models';
+} from '../modals';
 
 function cleanUndefined(obj: any): any {
   if (obj === null || typeof obj !== 'object') return obj;
@@ -30,24 +38,20 @@ function cleanUndefined(obj: any): any {
   return copy;
 }
 
-const INITIAL_RAW_MATERIALS: RawMaterial[] = [
-  { id: 'RM-1', name: 'Espresso Beans (Specialty)', unit: 'KG', currentStock: 12.5, minAlertStock: 3.0, costPerUnit: 18.5 },
-  { id: 'RM-2', name: 'Φρέσκο Γάλα 3.7%', unit: 'LITER', currentStock: 24.0, minAlertStock: 6.0, costPerUnit: 1.2 },
-  { id: 'RM-3', name: 'Γάλα Βρώμης (Barista)', unit: 'LITER', currentStock: 10.0, minAlertStock: 3.0, costPerUnit: 2.1 },
-  { id: 'RM-4', name: 'Ψωμί Brioche', unit: 'PCS', currentStock: 45.0, minAlertStock: 15.0, costPerUnit: 0.6 }
-];
-
 @Injectable({
   providedIn: 'root'
 })
 export class InventoryService {
+  private tenantContext = inject(TenantContextService);
   private db: Firestore | null = null;
+  private activeListeners: Unsubscribe[] = [];
 
-  // Signals
+  // Signals (Initialized empty to prevent data leakage before sync)
   public rawMaterials = signal<RawMaterial[]>([]);
   public categories = signal<Category[]>([]);
   public products = signal<Product[]>([]);
   public spoilageLogs = signal<SpoilageLog[]>([]);
+  public modifierGroups = signal<ModifierGroup[]>([]);
 
   // Computations
   public lowStockMaterials = computed(() => 
@@ -59,49 +63,97 @@ export class InventoryService {
   );
 
   /**
-   * Attach Firebase Firestore database reference & start realtime listeners
+   * Dynamic Resolver for Tenant ID & Store ID
    */
-  public initFirestoreSync(dbInstance: Firestore | null): void {
+  private getActiveTenantAndStore(): { tenantId: string; storeId: string } {
+    const tenantId = 
+      (this.tenantContext as any).currentTenantId?.() || 
+      (this.tenantContext as any).tenantId?.() || 
+      'coffee-shop-demo';
+
+    const storeId = 
+      (this.tenantContext as any).currentStoreId?.() || 
+      (this.tenantContext as any).activeStoreId?.() || 
+      (this.tenantContext as any).storeId?.() || 
+      'store-1';
+
+    return { tenantId, storeId };
+  }
+
+  /**
+   * Attach Firebase Firestore database reference & start realtime listeners strictly isolated by storeId
+   */
+  public initFirestoreSync(dbInstance: Firestore | null, isDemoTenantCheck?: () => boolean): void {
     if (!dbInstance) return;
     this.db = dbInstance;
 
-    // 1. Sync Raw Materials
-    onSnapshot(collection(this.db, 'rawMaterials'), (snap) => {
-      const list: RawMaterial[] = [];
-      if (!snap.empty) {
-        snap.forEach(docSnap => list.push(docSnap.data() as RawMaterial));
-      }
-      this.rawMaterials.set(list.length > 0 ? list : INITIAL_RAW_MATERIALS);
-    });
+    // Unsubscribe existing listeners if switching store
+    this.stopFirestoreSync();
 
-    // 2. Sync Categories
-    onSnapshot(collection(this.db, 'categories'), (snap) => {
-      const list: Category[] = [];
-      if (!snap.empty) {
-        snap.forEach(docSnap => list.push(docSnap.data() as Category));
-        list.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
-      }
-      this.categories.set(list);
-    });
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
 
-    // 3. Sync Products
-    onSnapshot(collection(this.db, 'products'), (snap) => {
-      const list: Product[] = [];
-      if (!snap.empty) {
-        snap.forEach(docSnap => list.push(docSnap.data() as Product));
-      }
-      this.products.set(list);
+    // 1. Sync Products (Filtered strictly by tenantId & storeId)
+    const prodQuery = query(
+      collection(this.db, 'products'),
+      where('tenantId', '==', tenantId),
+      where('storeId', '==', storeId)
+    );
+    const unsubProd = onSnapshot(prodQuery, (snap) => {
+      if (isDemoTenantCheck && isDemoTenantCheck()) return;
+      const prods: Product[] = [];
+      snap.forEach(d => prods.push(d.data() as Product));
+      this.products.set(prods);
     });
+    this.activeListeners.push(unsubProd);
 
-    // 4. Sync Spoilage Logs
-    onSnapshot(collection(this.db, 'spoilageLogs'), (snap) => {
-      const list: SpoilageLog[] = [];
-      if (!snap.empty) {
-        snap.forEach(docSnap => list.push(docSnap.data() as SpoilageLog));
-        list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      }
-      this.spoilageLogs.set(list);
+    // 2. Sync Categories (Filtered strictly by tenantId & storeId)
+    const catQuery = query(
+      collection(this.db, 'categories'),
+      where('tenantId', '==', tenantId),
+      where('storeId', '==', storeId)
+    );
+    const unsubCat = onSnapshot(catQuery, (snap) => {
+      if (isDemoTenantCheck && isDemoTenantCheck()) return;
+      const cats: Category[] = [];
+      snap.forEach(d => cats.push(d.data() as Category));
+      cats.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+      this.categories.set(cats);
     });
+    this.activeListeners.push(unsubCat);
+
+    // 3. Sync Raw Materials (Filtered strictly by tenantId & storeId)
+    const matQuery = query(
+      collection(this.db, 'rawMaterials'),
+      where('tenantId', '==', tenantId),
+      where('storeId', '==', storeId)
+    );
+    const unsubMat = onSnapshot(matQuery, (snap) => {
+      if (isDemoTenantCheck && isDemoTenantCheck()) return;
+      const mats: RawMaterial[] = [];
+      snap.forEach(d => mats.push(d.data() as RawMaterial));
+      this.rawMaterials.set(mats);
+    });
+    this.activeListeners.push(unsubMat);
+
+    // 4. Sync Spoilage Logs (Filtered strictly by tenantId & storeId)
+    const spoilQuery = query(
+      collection(this.db, 'spoilageLogs'),
+      where('tenantId', '==', tenantId),
+      where('storeId', '==', storeId)
+    );
+    const unsubSpoil = onSnapshot(spoilQuery, (snap) => {
+      if (isDemoTenantCheck && isDemoTenantCheck()) return;
+      const logs: SpoilageLog[] = [];
+      snap.forEach(d => logs.push(d.data() as SpoilageLog));
+      logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      this.spoilageLogs.set(logs);
+    });
+    this.activeListeners.push(unsubSpoil);
+  }
+
+  public stopFirestoreSync(): void {
+    this.activeListeners.forEach(unsub => unsub());
+    this.activeListeners = [];
   }
 
   // --- RAW MATERIALS MANAGEMENT ---
@@ -111,8 +163,12 @@ export class InventoryService {
       return { success: false, message: 'Το όνομα υλικού δεν μπορεί να είναι κενό.' };
     }
 
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+
     const newMat: RawMaterial = {
       id: `RM-${Date.now()}`,
+      tenantId, // 🔒 Dynamic
+      storeId,  // 🔒 Dynamic
       name: matData.name.trim(),
       unit: matData.unit || 'KG',
       currentStock: matData.currentStock >= 0 ? matData.currentStock : 0,
@@ -148,22 +204,22 @@ export class InventoryService {
     }
   }
 
- public adjustRawMaterialStock(id: string, newStockCount: number, reason: string = 'Απογραφή'): void {
-  const existing = this.rawMaterials().find(m => m.id === id);
-  if (!existing) return;
+  public adjustRawMaterialStock(id: string, newStockCount: number, reason: string = 'Απογραφή'): void {
+    const existing = this.rawMaterials().find(m => m.id === id);
+    if (!existing) return;
 
-  const updatedMat: RawMaterial = {
-    ...existing,
-    currentStock: Math.max(0, newStockCount)
-  };
+    const updatedMat: RawMaterial = {
+      ...existing,
+      currentStock: Math.max(0, newStockCount)
+    };
 
-  const updatedList = this.rawMaterials().map(m => m.id === id ? updatedMat : m);
-  this.rawMaterials.set(updatedList);
+    const updatedList = this.rawMaterials().map(m => m.id === id ? updatedMat : m);
+    this.rawMaterials.set(updatedList);
 
-  if (this.db) {
-    setDoc(doc(this.db, 'rawMaterials', id), cleanUndefined(updatedMat), { merge: true }).catch(() => {});
+    if (this.db) {
+      setDoc(doc(this.db, 'rawMaterials', id), cleanUndefined(updatedMat), { merge: true }).catch(() => {});
+    }
   }
-}
 
   public deleteRawMaterial(id: string): { success: boolean; message: string } {
     const target = this.rawMaterials().find(m => m.id === id);
@@ -236,6 +292,8 @@ export class InventoryService {
       m => m.name.toLowerCase() === data.itemName.toLowerCase()
     );
 
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+
     const unitCost = material?.costPerUnit || 0;
     const calculatedCostLoss = Number((unitCost * data.quantityWasted).toFixed(2));
 
@@ -246,6 +304,8 @@ export class InventoryService {
 
     const newLog: SpoilageLog = {
       id: `SPOIL-${Date.now()}`,
+      tenantId: currentEmp?.tenantId || tenantId, // 🔒 Dynamic fallback
+      storeId: currentEmp?.storeId || storeId,   // 🔒 Dynamic fallback
       itemId: material?.id || 'CUSTOM-ITEM',
       itemName: data.itemName,
       quantityWasted: data.quantityWasted,
@@ -272,11 +332,16 @@ export class InventoryService {
       return { success: false, message: 'Το όνομα κατηγορίας δεν μπορεί να είναι κενό.' };
     }
 
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+
     const newCat: Category = {
       id: `CAT-${Date.now()}`,
+      tenantId, // 🔒 Dynamic
+      storeId,  // 🔒 Dynamic
       name: name.trim(),
       icon: icon || '📁',
-      sortOrder: this.categories().length + 1
+      sortOrder: this.categories().length + 1,
+      isActive: true
     };
 
     const updated = [...this.categories(), newCat];
@@ -300,8 +365,12 @@ export class InventoryService {
 
   public addProduct(prodData: { name: string; categoryId: string; price: number; purchasePrice?: number; taxRate: GreekVatRate; isPinnedToPOS?: boolean }): void {
     const category = this.categories().find(c => c.id === prodData.categoryId);
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+
     const newProd: Product = {
       id: `PRD-${Date.now()}`,
+      tenantId, // 🔒 Dynamic
+      storeId,  // 🔒 Dynamic
       name: prodData.name,
       categoryId: prodData.categoryId,
       categoryName: category?.name || 'Γενικά',

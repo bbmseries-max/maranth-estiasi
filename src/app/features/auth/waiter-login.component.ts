@@ -1,145 +1,27 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { AutoLogoutService } from '../../core/services/auto-logout.service';
 import { Router } from '@angular/router';
-import { Employee } from '../../core/models/restaurant-pos.models';
+
+import { TenantContextService } from '../../core/services/tenant-context.service';
+import { AuthShiftService } from '../../core/services/auth-shift.service'; 
+import { AutoLogoutService } from '../../core/services/auto-logout.service';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
+import { MenuSeederService } from '../../core/services/menu-seeder.service';
+import { Employee } from '../../core/modals';
 
 @Component({
   selector: 'app-waiter-login',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  template: `
-    <div class="min-h-screen w-full bg-slate-900 flex items-center justify-center p-4 font-sans text-slate-100 select-none">
-      
-      <!-- MAIN AUTH CARD -->
-      <div class="bg-slate-800 border border-slate-700 w-full max-w-md rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col items-center">
-        
-        <!-- BRAND HEADER -->
-        <div class="flex flex-col items-center mb-6 text-center">
-          <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-400 flex items-center justify-center text-3xl shadow-lg mb-3">
-            ☕
-          </div>
-          <h1 class="text-2xl font-black tracking-tight text-white m-0">MARANTH ESTIASI</h1>
-          <p class="text-xs text-slate-400 font-medium uppercase tracking-widest mt-1">Σύστημα Εισόδου Προσωπικού</p>
-        </div>
-
-        @if (step() === 'PIN_ENTRY') {
-          <!-- PIN DISPLAY DOTS -->
-          <div class="w-full bg-slate-900 border-2 border-slate-700 rounded-2xl p-4 mb-6 flex flex-col items-center">
-            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">
-              Εισάγετε PIN (4 έως 8 ψηφία)
-            </span>
-            
-            <div class="flex gap-2.5 h-8 items-center justify-center">
-              @if (enteredPin().length === 0) {
-                <span class="text-xs font-mono text-slate-600 italic">••••</span>
-              } @else {
-                @for (char of enteredPin().split(''); track $index) {
-                  <div class="w-4 h-4 rounded-full bg-amber-400 border-2 border-amber-400 scale-110 shadow-[0_0_10px_rgba(251,191,36,0.5)] transition-all">
-                  </div>
-                }
-              }
-            </div>
-          </div>
-
-          <!-- TOUCH KEYPAD GRID -->
-          <div class="grid grid-cols-3 gap-3 w-full mb-4">
-            @for (num of [1, 2, 3, 4, 5, 6, 7, 8, 9]; track num) {
-              <button (click)="appendDigit(num.toString())"
-                      class="h-16 rounded-2xl bg-slate-700/60 hover:bg-slate-700 active:scale-95 text-white font-bold text-2xl transition-all border border-slate-600/50 shadow-md flex items-center justify-center cursor-pointer">
-                {{ num }}
-              </button>
-            }
-            <button (click)="clearPin()" 
-                    class="h-16 rounded-2xl bg-red-500/20 hover:bg-red-500/30 text-red-400 font-bold text-sm transition-all border border-red-500/30 flex items-center justify-center cursor-pointer">
-              Clear
-            </button>
-            <button (click)="appendDigit('0')"
-                    class="h-16 rounded-2xl bg-slate-700/60 hover:bg-slate-700 active:scale-95 text-white font-bold text-2xl transition-all border border-slate-600/50 shadow-md flex items-center justify-center cursor-pointer">
-              0
-            </button>
-            <button (click)="submitPin()"
-                    [disabled]="enteredPin().length < 4"
-                    class="h-16 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-bold text-xl transition-all border border-emerald-500 shadow-md flex items-center justify-center cursor-pointer">
-              ✓
-            </button>
-          </div>
-
-          <!-- BIOMETRIC FINGERPRINT LOGIN BUTTON -->
-          @if (supportsBiometrics) {
-            <button type="button"
-                    (click)="loginWithBiometrics()"
-                    class="w-full py-3.5 px-4 rounded-2xl bg-slate-700 hover:bg-slate-600 border border-amber-500/40 text-amber-400 font-bold text-sm transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer active:scale-95 mt-2">
-              <span class="text-xl">👆</span>
-              <span>Είσοδος με Αποτύπωμα</span>
-            </button>
-          }
-        }
-
-        @if (step() === 'SHIFT_SETUP') {
-          <!-- SHIFT START & EDITABLE VAULT FLOAT SETUP -->
-          <div class="w-full flex flex-col gap-4 animate-fade-in">
-            <div class="bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl flex items-center gap-3">
-              <span class="text-3xl">👤</span>
-              <div>
-                <div class="font-black text-white text-base">{{ posService.currentEmployee()?.name }}</div>
-                <div class="text-xs text-amber-400 font-bold">Ρόλος: {{ posService.getRoleLabel(posService.currentEmployee()?.role || 'WAITER') }}</div>
-              </div>
-            </div>
-
-            <div class="flex flex-col gap-2 bg-slate-900 border border-slate-700 p-4 rounded-2xl">
-              <label class="text-xs font-black text-slate-300 uppercase tracking-wider flex justify-between items-center">
-                <span>💰 Αρχικό Ταμείο / Ρέστα (€)</span>
-                <span class="text-[10px] text-emerald-400 font-bold">Επεξεργάσιμο</span>
-              </label>
-              
-              <div class="relative">
-                <input type="number" step="5" min="0" [(ngModel)]="startingFloat"
-                       class="w-full bg-slate-950 border-2 border-emerald-500/80 rounded-xl px-4 py-3 text-3xl font-black text-emerald-400 text-center focus:outline-none focus:border-amber-400 shadow-inner" />
-              </div>
-
-              <!-- QUICK FLOAT PRESET BUTTONS -->
-              <div class="grid grid-cols-4 gap-2 mt-1">
-                <button (click)="startingFloat = 0" class="py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 cursor-pointer">€0</button>
-                <button (click)="startingFloat = 20" class="py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 cursor-pointer">€20</button>
-                <button (click)="startingFloat = 50" class="py-1.5 rounded-lg bg-amber-500/20 text-amber-400 font-bold text-xs border border-amber-500/40 cursor-pointer">€50</button>
-                <button (click)="startingFloat = 100" class="py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 cursor-pointer">€100</button>
-              </div>
-
-              <span class="text-[11px] text-slate-400 block mt-1 text-center">
-                Εισάγετε ή τροποποιήστε το αρχικό ποσό μετρητών στο πορτοφόλι σας.
-              </span>
-            </div>
-
-            <div class="flex gap-2">
-              <button (click)="cancelShiftSetup()" 
-                      class="py-3 px-4 rounded-xl bg-slate-700 hover:bg-slate-600 font-bold text-slate-300 text-xs cursor-pointer">
-                ⬅️ Ακύρωση
-              </button>
-              <button (click)="startShiftAndVault()"
-                      class="flex-1 py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-base transition-all shadow-lg active:scale-95 cursor-pointer">
-                🚀 Έναρξη & Είσοδος (€{{ startingFloat }})
-              </button>
-            </div>
-          </div>
-        }
-
-        <!-- ERROR ALERT -->
-        @if (errorMessage()) {
-          <div class="w-full mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-bold text-center">
-            {{ errorMessage() }}
-          </div>
-        }
-
-      </div>
-    </div>
-  `
+  templateUrl: './waiter-login.component.html'
 })
 export class WaiterLoginComponent implements OnInit {
+  public authShiftService = inject(AuthShiftService);
+  private tenantContext = inject(TenantContextService);
   public posService = inject(RestaurantPosService);
   private autoLogoutService = inject(AutoLogoutService);
+  private menuSeeder = inject(MenuSeederService);
   private router = inject(Router);
 
   public step = signal<'PIN_ENTRY' | 'SHIFT_SETUP'>('PIN_ENTRY');
@@ -153,10 +35,11 @@ export class WaiterLoginComponent implements OnInit {
     this.enteredPin.set('');
     this.errorMessage.set('');
     this.supportsBiometrics = !!(window.PublicKeyCredential);
-    
+
+    // 1. If an employee is ALREADY logged in and active, navigate away safely
     const emp = this.posService.currentEmployee();
-    if (emp) {
-      this.handleSuccessfulLogin(emp);
+    if (emp && this.posService.getEmployeeActiveShift(emp.id)) {
+      this.redirectByRole(emp.role);
     } else {
       this.step.set('PIN_ENTRY');
     }
@@ -166,6 +49,11 @@ export class WaiterLoginComponent implements OnInit {
     if (this.enteredPin().length < 8) {
       this.enteredPin.update(pin => pin + digit);
       this.errorMessage.set('');
+      
+      // Auto-submit on 4 digits if simple PIN login
+      if (this.enteredPin().length === 4) {
+        this.submitPin();
+      }
     }
   }
 
@@ -174,17 +62,39 @@ export class WaiterLoginComponent implements OnInit {
     this.errorMessage.set('');
   }
 
-  public submitPin(): void {
-    if (this.enteredPin().length < 4) return;
+public async submitPin(): Promise<void> {
+  // Extract entered PIN
+  const pinValue = this.enteredPin(); 
 
-    const result = this.posService.loginWithPin(this.enteredPin());
-    if (result.success && result.employee) {
-      this.handleSuccessfulLogin(result.employee);
-    } else {
-      this.errorMessage.set(result.message);
-      this.clearPin();
-    }
+  if (!pinValue) {
+    this.errorMessage.set('Παρακαλώ εισάγετε PIN.');
+    return;
   }
+
+  this.errorMessage.set(''); // Reset error message
+
+  try {
+    // 🔒 Await the asynchronous Firestore lookup
+    const result: any = await this.authShiftService.loginWithPin(pinValue);
+
+    // Handle both return types: wrapper object OR direct Employee
+    const employee = result?.employee || (result?.id ? result : null);
+
+    if (employee && result?.success !== false) {
+      // Save session so roleGuard persists across navigation
+      localStorage.setItem('current_employee', JSON.stringify(employee));
+      localStorage.setItem('maranth_pos_employee', JSON.stringify(employee));
+
+      this.handleSuccessfulLogin(employee);
+    } else {
+      const msg = result?.message || 'Άκυρος κωδικός PIN. Παρακαλώ δοκιμάστε ξανά.';
+      this.errorMessage.set(msg);
+    }
+  } catch (err) {
+    console.error('Login submit error:', err);
+    this.errorMessage.set('Σφάλμα κατά τη σύνδεση. Παρακαλώ δοκιμάστε ξανά.');
+  }
+}
 
   public async loginWithBiometrics(): Promise<void> {
     this.errorMessage.set('');
@@ -260,45 +170,18 @@ export class WaiterLoginComponent implements OnInit {
   private isKitchenOnlyRole(role?: string): boolean {
     if (!role) return false;
     const r = role.toUpperCase();
-    return ['BARMAN', 'BARISTA', 'CHEF', 'KITCHEN'].includes(r);
+    return false; // ['BARMAN', 'BARISTA', 'CHEF', 'KITCHEN'].includes(r);
   }
 
-  private handleSuccessfulLogin(emp: Employee): void {
+private handleSuccessfulLogin(employee: Employee): void {
+  const role = (employee.role || '').toUpperCase();
 
-    this.autoLogoutService.startMonitoring();
-    this.autoLogoutService.resetTimer();
-    // 👈 1. If user is Barman, Chef, Barista, or Kitchen: Auto-start with 0 float and skip setup screen!
-    if (this.isKitchenOnlyRole(emp.role)) {
-      const activeShift = this.posService.getEmployeeActiveShift(emp.id);
-      if (!activeShift) {
-        this.posService.clockInShift('Έναρξη βάρδιας μέσω τερματικού (Κουζίνα/Bar)');
-        this.posService.openWaiterVault(0);
-
-        // 👈 Reset timer after starting shift float setup
-    this.autoLogoutService.startMonitoring();
-    this.autoLogoutService.resetTimer();
-
-    const emp = this.posService.currentEmployee();
-    if (emp) {
-      this.redirectByRole(emp.role);
-    } else {
-      this.router.navigate(['/floor-plan']);
-    }
-    }
-      this.redirectByRole(emp.role);
-      return;
-    }
-
-    // 👈 2. For Waiters & Managers: Prompt for float if no active shift
-    const activeShift = this.posService.getEmployeeActiveShift(emp.id);
-    if (!activeShift) {
-      this.startingFloat = 50;
-      this.step.set('SHIFT_SETUP');
-    } else {
-      this.redirectByRole(emp.role);
-    }
+  if (role === 'KITCHEN') {
+    this.router.navigate(['/kitchen']);
+  } else {
+    this.router.navigate(['/floor-plan']);
   }
-
+}
   public cancelShiftSetup(): void {
     this.posService.logoutEmployee();
     this.enteredPin.set('');
@@ -319,11 +202,16 @@ export class WaiterLoginComponent implements OnInit {
     }
   }
 
-  private redirectByRole(role?: string): void {
-    if (this.isKitchenOnlyRole(role)) {
-      this.router.navigate(['/kitchen']);
-    } else {
-      this.router.navigate(['/floor-plan']);
-    }
+ private redirectByRole(role?: string): void {
+  const r = role?.toUpperCase() || '';
+  console.log(`🔀 Navigating user with role: ${r}`);
+
+  // If you want Kitchen / Bar roles to go to kitchen view:
+  if (['BAR', 'BARISTA', 'CHEF', 'KITCHEN'].includes(r)) {
+    // 👈 Ensure '/kitchen' route exists in app.routes.ts, OR change to '/floor-plan'
+    this.router.navigate(['/floor-plan']); // Or this.router.navigate(['/kitchen']);
+  } else {
+    this.router.navigate(['/floor-plan']);
   }
+}
 }

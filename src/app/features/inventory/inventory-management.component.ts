@@ -2,7 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { GreekVatRate } from '../../core/models/restaurant-pos.models';
+import { GreekVatRate } from '../../core/modals/restaurant-pos.modals';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
 import { 
   RawMaterial, 
@@ -12,7 +12,7 @@ import {
   RestaurantTable,
   Role,
   UnitOfMeasure
-} from '../../core/models/restaurant-pos.models';
+} from '../../core/modals/restaurant-pos.modals';
 
 @Component({
   selector: 'app-inventory-management',
@@ -30,10 +30,9 @@ import {
           </a>
           <div>
             <h1 class="text-lg font-black text-white m-0 flex items-center gap-2">
-              <span>📦</span>
-              <span>Διαχείριση Αποθήκης, Τιμοκαταλόγου & Τραπεζιών</span>
+             <!-- <span>🪄 magicBoard</span> -->
             </h1>
-            <span class="text-[10px] text-amber-400 font-bold">Πρώτες Ύλες, Κατηγορίες, Προϊόντα, Τραπέζια & PINs (Real-Time Cloud Sync)</span>
+            <span class="text-[20px] text-amber-400 font-bold">🪄Board</span>
           </div>
         </div>
 
@@ -65,14 +64,14 @@ import {
             🗑️ Φύρα & Ζημιές
           </button>
 
-          <!-- MASTER FRESH START RESET BUTTON -->
+          <!-- MASTER FRESH START RESET BUTTON 
           @if (posService.canManageSystem()) {
             <button (click)="triggerFreshStartReset()"
                     class="px-3 py-1.5 rounded-xl bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/40 font-bold text-xs transition-all cursor-pointer flex items-center gap-1 shadow-sm">
               <span>🔥</span>
               <span>Fresh Start</span>
             </button>
-          }
+          }-->
         </div>
       </header>
 

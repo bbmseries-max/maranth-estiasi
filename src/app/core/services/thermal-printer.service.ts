@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { DailyZReportSnapshot, WaiterVaultSession } from '../models/restaurant-pos.models';
+import { DailyZReportSnapshot, WaiterVaultSession } from '../modals/restaurant-pos.modals';
 
 @Injectable({
   providedIn: 'root'

@@ -2,7 +2,7 @@ import { Component, inject, signal, computed, Input, Output, EventEmitter } from
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RestaurantPosService } from '../../../../core/services/restaurant-pos.service';
-import { WaiterVaultSession } from '../../../../core/models/restaurant-pos.models'; 
+import { WaiterVaultSession } from '../../../../core/modals/restaurant-pos.modals'; 
 
 @Component({
   selector: 'app-vault-closure-modal',

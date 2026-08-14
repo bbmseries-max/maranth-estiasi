@@ -4,7 +4,7 @@ import { VaultClosureModalComponent } from '../staff/components/vault-closure-mo
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
-import { RestaurantTable, WaiterVaultSession } from '../../core/models/restaurant-pos.models';
+import { RestaurantTable, WaiterVaultSession } from '../../core/modals/restaurant-pos.modals';
 
 export type TableVisualStatus = 'FREE' | 'PENDING' | 'PREPARING' | 'READY_TO_SERVE' | 'BILL_PRINTED';
 

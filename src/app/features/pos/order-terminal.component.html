@@ -1,0 +1,327 @@
+<div class="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans select-none">
+  
+  <!-- TOP NAVIGATION BAR -->
+  <header class="h-16 bg-slate-800 border-b border-slate-700/80 px-4 flex items-center justify-between shadow-md">
+    <div class="flex items-center gap-3">
+      <a routerLink="/floor-plan" class="p-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs no-underline flex items-center gap-1.5 transition-all cursor-pointer">
+        <span>⬅️</span>
+        <span class="hidden sm:inline">Πλάνο</span>
+      </a>
+      <div>
+        <h1 class="text-lg font-black text-white m-0">
+          Τραπέζι #{{ activeTable()?.tableNumber || activeTable()?.number || '?' }}
+        </h1>
+        <span class="text-[10px] text-amber-400 font-bold">📍 Ζώνη: {{ activeTable()?.zone || activeTable()?.section || 'Σάλα' }}</span>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <!-- QUICK SEARCH BAR -->
+      <div class="relative hidden md:block">
+        <input type="text" [(ngModel)]="searchQuery" placeholder="Αναζήτηση προϊόντος..."
+               class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 w-48" />
+      </div>
+
+      <!-- KITCHEN DISPATCH BUTTON -->
+      <button (click)="sendOrder()" 
+              [disabled]="!hasPendingItems()"
+              class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-black text-xs shadow-md transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer">
+        <span>🍳</span>
+        <span>Αποστολή ({{ pendingItemsCount() }})</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN POS GRID & BASKET SPLIT -->
+  <div class="flex-1 flex flex-col lg:flex-row overflow-hidden">
+    
+    <!-- LEFT: CATEGORIES & PRODUCT TILES -->
+    <div class="flex-1 flex flex-col p-4 overflow-y-auto gap-4">
+      
+     <!-- CATEGORY TABS -->
+<div class="w-full min-w-0 max-w-full bg-slate-900 border-b border-slate-800 p-2 shrink-0 rounded-2xl">
+  <div class="grid grid-rows-2 grid-flow-col auto-cols-max gap-2 overflow-x-auto min-w-0 w-full pb-1 hide-scrollbar touch-pan-x">
+    
+    <!-- "ALL" CATEGORY BUTTON -->
+    <button (click)="selectedCategoryId.set('ALL')"
+            type="button"
+            class="shrink-0 px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center justify-center min-w-[90px] cursor-pointer"
+            [ngClass]="selectedCategoryId() === 'ALL' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+      🌐 Όλα
+    </button>
+
+    <!-- CATEGORIES LOOP -->
+    @for (cat of categories(); track cat.id) {
+      <button (click)="selectedCategoryId.set(cat.id)"
+              type="button"
+              class="shrink-0 px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center justify-center min-w-[100px] cursor-pointer"
+              [ngClass]="selectedCategoryId() === cat.id ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+        {{ cat.name }}
+      </button>
+    }
+
+  </div>
+</div>
+
+<!-- PRODUCTS GRID LOOP -->
+<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mt-4">
+  @for (product of filteredProducts(); track product.id) {
+    <button (click)="onProductClick(product)"
+            class="bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700/80 rounded-2xl p-3.5 flex flex-col justify-between items-start text-left min-h-[100px] shadow-md transition-all group cursor-pointer">
+      <span class="text-xs font-bold text-slate-100 group-hover:text-amber-400 transition-colors line-clamp-2">
+        {{ product.name }}
+      </span>
+      <div class="w-full flex justify-between items-end mt-2">
+        <span class="text-xs text-slate-400 font-semibold">{{ product.taxRate || 13 }}% ΦΠΑ</span>
+        <span class="text-base font-black text-emerald-400">€{{ product.price.toFixed(2) }}</span>
+      </div>
+    </button>
+  } @empty {
+    <div class="col-span-full py-12 text-center text-slate-500 font-bold text-xs">
+      Δεν βρέθηκαν προϊόντα.
+    </div>
+  }
+</div>
+
+    </div>
+
+    <!-- RIGHT: ACTIVE TICKET BASKET & PAYMENT ACTIONS -->
+    <div class="w-full lg:w-96 bg-slate-800/95 border-t lg:border-t-0 lg:border-l border-slate-700/80 flex flex-col p-4 shadow-2xl">
+      
+      <div class="flex justify-between items-center border-b border-slate-700 pb-3 mb-3">
+        <span class="text-xs font-black text-slate-400 uppercase tracking-wider">Λογαριασμός Τραπεζιού</span>
+        <span class="text-xs font-bold text-amber-400">
+          {{ activeItemsCount() }} είδη
+        </span>
+      </div>
+
+      <!-- TICKET ITEMS LIST -->
+      <div class="flex-1 overflow-y-auto flex flex-col gap-2.5 pr-1">
+        @for (item of activeTable()?.activeOrder?.items; track item.id) {
+          <div class="bg-slate-900/80 border rounded-2xl p-3 flex flex-col gap-2 transition-all"
+               [ngClass]="getItemCardBorderClass(item.status)">
+            
+            <!-- TOP LINE: ITEM NAME, STATUS & PRICE -->
+            <div class="flex justify-between items-start">
+              <div class="flex flex-col">
+                <span class="text-xs font-bold" [ngClass]="item.status === 'VOIDED' ? 'line-through text-red-400' : 'text-white'">
+                  {{ item.productName }}
+                </span>
+                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded border self-start mt-0.5"
+                      [ngClass]="getItemStatusBadgeClass(item.status)">
+                  {{ getItemStatusLabel(item.status) }}
+                </span>
+              </div>
+
+              <span class="text-xs font-black" [ngClass]="item.status === 'VOIDED' ? 'line-through text-red-400/60' : 'text-emerald-400'">
+                €{{ (item.finalItemPrice * item.quantity).toFixed(2) }}
+              </span>
+            </div>
+
+            <!-- MODIFIERS SUMMARY -->
+            @if (item.modifiers && item.modifiers.length > 0) {
+              <div class="flex flex-wrap gap-1">
+                @for (mod of item.modifiers; track mod.name) {
+                  <span class="text-[10px] bg-slate-800 text-amber-400 px-2 py-0.5 rounded-full border border-slate-700">
+                    + {{ mod.name }}
+                  </span>
+                }
+              </div>
+            }
+
+            @if (item.itemNotes) {
+              <span class="text-[10px] text-slate-400 italic">📝 {{ item.itemNotes }}</span>
+            }
+
+            <!-- ITEM QUANTITY ADJUSTERS & VOID BUTTONS -->
+            @if (item.status !== 'VOIDED') {
+              <div class="flex items-center justify-between pt-2 border-t border-slate-800/80 mt-1">
+                
+                <!-- QUANTITY ADJUST CONTROLS -->
+                <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                  <button (click)="adjustItemQuantity(item.id, -1)"
+                          class="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center justify-center active:scale-95 transition-all cursor-pointer">
+                    ➖
+                  </button>
+                  
+                  <span class="text-xs font-black text-amber-400 px-2 min-w-[20px] text-center">
+                    {{ item.quantity }}
+                  </span>
+
+                  <button (click)="adjustItemQuantity(item.id, 1)"
+                          class="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center justify-center active:scale-95 transition-all cursor-pointer">
+                    ➕
+                  </button>
+                </div>
+
+                <!-- VOID / DELETE BUTTON -->
+                <button (click)="promptVoidItem(item)"
+                        class="px-2.5 py-1 rounded-lg bg-red-950/60 hover:bg-red-900/80 text-red-400 border border-red-500/30 text-[10px] font-bold transition-all active:scale-95 flex items-center gap-1 cursor-pointer">
+                  <span>🗑️</span>
+                  <span>{{ item.status === 'PENDING' ? 'Διαγραφή' : 'Ακύρωση' }}</span>
+                </button>
+
+              </div>
+            }
+
+          </div>
+        } @empty {
+          <div class="flex-1 flex flex-col items-center justify-center text-slate-500 py-12">
+            <span class="text-3xl mb-2">☕</span>
+            <span class="text-xs font-bold">Το τραπέζι είναι ελεύθερο</span>
+          </div>
+        }
+      </div>
+
+      <!-- KITCHEN ORDER-WIDE NOTE INPUT -->
+      <div class="p-3 bg-slate-900 border border-slate-800 rounded-2xl my-3">
+        <label class="block text-xs font-extrabold text-amber-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+          <span>📝</span>
+          <span>Σημείωση Κουζίνας / Bar</span>
+        </label>
+        <input
+          type="text"
+          [(ngModel)]="currentOrderNotes"
+          (ngModelChange)="onOrderNotesChange($event)"
+          placeholder="π.χ. Αλλεργία σε ξηρούς καρπούς, φέρτε πρώτα τα ποτά..."
+          class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+        />
+      </div>
+
+      <!-- ORDER TOTALS & TABLE CLOSING PAYMENT BUTTONS -->
+      <div class="pt-3 border-t border-slate-700/80 flex flex-col gap-2 mt-2">
+        <div class="flex justify-between items-center text-xs text-slate-400">
+          <span>Καθαρή Αξία:</span>
+          <span class="font-bold text-white">€{{ activeTable()?.activeOrder?.subtotalNet?.toFixed(2) || '0.00' }}</span>
+        </div>
+        <div class="flex justify-between items-center text-xs text-slate-400">
+          <span>ΦΠΑ:</span>
+          <span class="font-bold text-white">€{{ activeTable()?.activeOrder?.totalTax?.toFixed(2) || '0.00' }}</span>
+        </div>
+        <div class="flex justify-between items-center text-base font-black text-white pt-2 border-t border-slate-700">
+          <span>Σύνολο:</span>
+          <span class="text-2xl text-emerald-400">€{{ activeTable()?.activeOrder?.grandTotal?.toFixed(2) || '0.00' }}</span>
+        </div>
+
+        <!-- TABLE CLOSING PAYMENT ACTIONS -->
+        @if ((activeTable()?.activeOrder?.grandTotal || 0) > 0) {
+          <div class="flex flex-col gap-2 mt-2 pt-2 border-t border-slate-700">
+            <div class="grid grid-cols-2 gap-2">
+              <button (click)="settlePayment('CASH')"
+                      class="py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-black text-white text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-1 cursor-pointer">
+                <span>💵</span>
+                <span>Μετρητά</span>
+              </button>
+              <button (click)="settlePayment('CARD')"
+                      class="py-3 rounded-xl bg-sky-600 hover:bg-sky-500 font-black text-white text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-1 cursor-pointer">
+                <span>💳</span>
+                <span>Κάρτα</span>
+              </button>
+            </div>
+            
+            <button (click)="printBill()"
+                    class="w-full py-2 rounded-xl bg-slate-700 hover:bg-slate-600 font-bold text-amber-400 text-xs border border-amber-500/30 transition-all flex items-center justify-center gap-1 cursor-pointer">
+              <span>🧾</span>
+              <span>Εκτύπωση Λογαριασμού</span>
+            </button>
+          </div>
+        }
+      </div>
+
+    </div>
+
+  </div>
+</div>
+<!-- MODIFIER SELECTION MODAL -->
+@if (selectedProductForModifiers()) {
+  <div class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+    
+    <div class="w-full max-w-lg bg-slate-900 border border-slate-700/80 rounded-3xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+      
+      <!-- MODAL HEADER -->
+      <div class="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-800/40">
+        <div>
+          <h3 class="text-lg font-black text-white m-0">
+            {{ selectedProductForModifiers()?.name }}
+          </h3>
+          <p class="text-xs font-semibold text-slate-400 mt-0.5">
+            Προσαρμογή Επιλογών &amp; Extra
+          </p>
+        </div>
+        <button (click)="closeModifierModal()"
+                type="button"
+                class="w-10 h-10 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center font-bold text-lg cursor-pointer transition-all">
+          ✕
+        </button>
+      </div>
+
+      <!-- MODAL BODY: MODIFIER GROUPS -->
+      <div class="p-5 overflow-y-auto flex-1 flex flex-col gap-6">
+        @for (group of activeModifierGroups(); track group.id) {
+          <div class="flex flex-col gap-2.5">
+            
+            <div class="flex justify-between items-center">
+              <span class="text-xs font-bold uppercase tracking-wider text-amber-400">
+                {{ group.name }}
+                @if (group.required) {
+                  <span class="text-red-400 ml-1">*</span>
+                }
+              </span>
+              <span class="text-[11px] font-semibold text-slate-500">
+                {{ group.maxSelections === 1 ? 'Επιλογή 1' : 'Έως ' + group.maxSelections }}
+              </span>
+            </div>
+
+            <!-- OPTIONS GRID -->
+            <div class="grid grid-cols-2 gap-2.5">
+              @for (opt of group.options; track opt.id) {
+                <button (click)="toggleModifierOption(group.id, opt.id, group.maxSelections)"
+                        type="button"
+                        class="px-3.5 py-3 rounded-2xl border text-left flex justify-between items-center transition-all cursor-pointer"
+                        [ngClass]="isOptionSelected(group.id, opt.id) 
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold shadow-sm' 
+                          : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-800'">
+                  
+                  <span class="text-xs line-clamp-1">{{ opt.name }}</span>
+
+                  @if (opt.priceExtra && opt.priceExtra > 0) {
+                    <span class="text-[11px] font-extrabold text-emerald-400 ml-1">
+                      +€{{ opt.priceExtra.toFixed(2) }}
+                    </span>
+                  }
+                </button>
+              }
+            </div>
+
+          </div>
+        }
+      </div>
+
+      <!-- MODAL FOOTER -->
+      <div class="p-5 border-t border-slate-800 bg-slate-900 flex items-center justify-between gap-4">
+        <div class="flex flex-col">
+          <span class="text-[11px] font-bold text-slate-400 uppercase">Σύνολο Προϊόντος</span>
+          <span class="text-2xl font-black text-emerald-400">
+            €{{ getModalCalculatedPrice().toFixed(2) }}
+          </span>
+        </div>
+
+        <div class="flex gap-2">
+          <button (click)="closeModifierModal()"
+                  type="button"
+                  class="px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-all cursor-pointer">
+            Ακύρωση
+          </button>
+          
+          <button (click)="confirmModifierSelection()"
+                  type="button"
+                  class="px-6 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-lg active:scale-95 transition-all cursor-pointer flex items-center gap-1.5">
+            <span>➕</span>
+            <span>Προσθήκη</span>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+}

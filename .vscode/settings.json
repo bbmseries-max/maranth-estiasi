@@ -1,0 +1,4 @@
+{
+  "angular.ngServer.path": "node_modules/@angular/language-service",
+  "js/ts.tsdk.path": "node_modules/typescript/lib"
+}

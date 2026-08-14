@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 
 // 🎯 Adjusted relative paths to point to core
 import { RestaurantPosService } from '../../../../core/services/restaurant-pos.service';
-import { WaiterVaultSession } from '../../../../core/models/restaurant-pos.models';
+import { WaiterVaultSession } from '../../../../core/modals/restaurant-pos.modals';
 import { ThermalPrinterService } from '../../../../core/services/thermal-printer.service';
 
 @Component({

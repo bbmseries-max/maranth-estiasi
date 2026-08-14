@@ -1,7 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Employee, Role, WaiterVaultSession } from '../../core/models/restaurant-pos.models';
+import { Employee, Role, WaiterVaultSession } from '../../core/modals/restaurant-pos.modals';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
 import { WaiterVaultModalComponent } from './components/waiter-vault-modal/waiter-vault-modal.component';
 

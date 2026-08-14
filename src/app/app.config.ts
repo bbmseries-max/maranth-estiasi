@@ -1,15 +1,21 @@
+// src/app/app.config.ts
+
 import { ApplicationConfig, provideZoneChangeDetection } from '@angular/core';
-import { provideRouter, withComponentInputBinding, withViewTransitions } from '@angular/router';
+import { provideRouter } from '@angular/router';
 import { routes } from './app.routes';
+
+// Firebase imports
+import { initializeApp, provideFirebaseApp } from '@angular/fire/app';
+import { getFirestore, provideFirestore } from '@angular/fire/firestore';
+import { environment } from '../environments/environments';
 
 export const appConfig: ApplicationConfig = {
   providers: [
-    // Configures standard event-coalesced change detection to work smoothly with zone.js
     provideZoneChangeDetection({ eventCoalescing: true }),
-    provideRouter(
-      routes, 
-      withComponentInputBinding(),
-      withViewTransitions()
-    )
+    provideRouter(routes),
+    
+    // ⬇️ MAKE SURE THESE TWO LINES ARE PRESENT IN YOUR PROVIDERS:
+    provideFirebaseApp(() => initializeApp(environment.firebase)),
+    provideFirestore(() => getFirestore())
   ]
 };

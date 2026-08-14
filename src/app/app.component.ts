@@ -1,9 +1,12 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule, SlicePipe } from '@angular/common';
+import { MenuService } from './core/services/menu.service';
+import { TenantContextService } from './core/services/tenant-context.service';
+import { MenuSeederService } from './core/services/menu-seeder.service';
 import { AutoLogoutService } from './core/services/auto-logout.service';
 import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 import { RestaurantPosService } from './core/services/restaurant-pos.service';
-import { EmployeeRole } from './core/models/restaurant-pos.models';
+import { EmployeeRole } from './core/modals/restaurant-pos.modals';
 
 @Component({
   selector: 'app-root',
@@ -11,17 +14,22 @@ import { EmployeeRole } from './core/models/restaurant-pos.models';
   imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive, SlicePipe],
   templateUrl: './app.component.html'
 })
-export class AppComponent {
-private autoLogoutService = inject(AutoLogoutService);
-
-  ngOnInit(): void {
-    // Start bulletproof inactivity monitoring globally
-    this.autoLogoutService.startMonitoring();
-  }
-
+export class AppComponent implements OnInit {
+  private autoLogoutService = inject(AutoLogoutService);
+  private seeder = inject(MenuSeederService);
+  private tenantContext = inject(TenantContextService);
+  private menuService = inject(MenuService);
 
   public posService = inject(RestaurantPosService);
   public isBellDrawerOpen = signal<boolean>(false);
+
+  async ngOnInit() {
+    // 1. Start bulletproof inactivity monitoring globally
+    this.autoLogoutService.startMonitoring();
+
+    // 2. 🔒 Only seed if in demo mode, NEVER force override active tenant context
+    this.seeder.checkAndSeedDemoIfNeeded();
+  }
 
   public canAccessFloorPlan(role?: string): boolean {
     if (!role) return false;
@@ -32,7 +40,6 @@ private autoLogoutService = inject(AutoLogoutService);
   public canAccessKitchen(role?: string): boolean {
     if (!role) return false;
     const r = role.toUpperCase();
-    // 👈 Added CHEF and BARMAN here
     return ['MANAGER', 'ADMIN', 'OWNER', 'BARISTA', 'KITCHEN', 'CHEF', 'BARMAN'].includes(r);
   }
 
@@ -45,7 +52,6 @@ private autoLogoutService = inject(AutoLogoutService);
   public isKitchenOnly(role?: string): boolean {
     if (!role) return false;
     const r = role.toUpperCase();
-    // 👈 Added CHEF and BARMAN here
     return ['BARISTA', 'KITCHEN', 'CHEF', 'BARMAN'].includes(r);
   }
 

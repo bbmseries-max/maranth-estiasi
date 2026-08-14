@@ -1,3 +1,5 @@
+// src/app/core/services/table-order.service.ts
+
 import { Injectable, signal, computed, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { 
@@ -8,8 +10,12 @@ import {
   deleteDoc, 
   onSnapshot, 
   deleteField, 
-  Timestamp 
+  Timestamp,
+  query,
+  where,
+  Unsubscribe
 } from 'firebase/firestore';
+import { TenantContextService } from './tenant-context.service';
 
 import { 
   Table, 
@@ -19,9 +25,17 @@ import {
   Product, 
   OrderModifier, 
   SaleRecord, 
-  ReadyNotification, 
+  ReadyNotification,
+  SelectedModifier,  
   Employee 
-} from '../models/restaurant-pos.models';
+} from '../modals';
+
+export interface CartItem {
+  product: Product;
+  selectedModifiers: SelectedModifier[];
+  price: number;
+  quantity: number;
+}
 
 function cleanUndefined(obj: any): any {
   if (obj === null || typeof obj !== 'object') return obj;
@@ -35,22 +49,16 @@ function cleanUndefined(obj: any): any {
   return copy;
 }
 
-const INITIAL_TABLES: Table[] = [
-  { id: 't1', number: 1, tableNumber: 1, seats: 4, section: 'INDOOR', zone: 'Σάλα', status: 'FREE', currentTotal: 0 },
-  { id: 't2', number: 2, tableNumber: 2, seats: 2, section: 'INDOOR', zone: 'Σάλα', status: 'FREE', currentTotal: 0 },
-  { id: 't3', number: 3, tableNumber: 3, seats: 6, section: 'INDOOR', zone: 'Σάλα', status: 'FREE', currentTotal: 0 },
-  { id: 't4', number: 4, tableNumber: 4, seats: 4, section: 'OUTDOOR', zone: 'Αυλή', status: 'FREE', currentTotal: 0 },
-  { id: 't5', number: 5, tableNumber: 5, seats: 4, section: 'OUTDOOR', zone: 'Αυλή', status: 'FREE', currentTotal: 0 },
-  { id: 't6', number: 6, tableNumber: 6, seats: 2, section: 'BAR', zone: 'Bar', status: 'FREE', currentTotal: 0 },
-  { id: 'takeaway-counter', number: 99, tableNumber: 99, seats: 1, section: 'TAKEAWAY', zone: 'Παραλαβή', status: 'FREE', currentTotal: 0 }
-];
-
 @Injectable({
   providedIn: 'root'
 })
 export class TableOrderService {
+  private tenantContext = inject(TenantContextService);
   private router = inject(Router);
   private db: Firestore | null = null;
+  private activeTablesUnsub: Unsubscribe | null = null;
+
+  public cartItems = signal<CartItem[]>([]);
 
   // Signals
   public tables = signal<Table[]>([]);
@@ -75,13 +83,61 @@ export class TableOrderService {
   );
 
   /**
-   * Initialize Firestore listeners for tables and active floor orders
+   * Dynamic Resolver for Tenant ID & Store ID (Priority: localStorage -> Service Signal -> Fallback)
+   */
+  private getActiveTenantAndStore(): { tenantId: string; storeId: string } {
+    const tenantId = 
+      localStorage.getItem('active_tenant_id') ||
+      (this.tenantContext as any).currentTenantId?.() || 
+      (this.tenantContext as any).tenantId?.() || 
+      'coffee-shop-demo';
+
+    const storeId = 
+      localStorage.getItem('active_store_id') ||
+      (this.tenantContext as any).currentStoreId?.() || 
+      (this.tenantContext as any).activeStoreId?.() || 
+      (this.tenantContext as any).storeId?.() || 
+      'store-1';
+
+    return { tenantId, storeId };
+  }
+
+  /**
+   * Helper to create dynamic default floor plan for a brand new store
+   */
+  private getInitialDefaultTables(tenantId: string, storeId: string): Table[] {
+    return [
+      { id: `${storeId}_t1`, tenantId, storeId, number: 1, tableNumber: 1, seats: 4, section: 'INDOOR', zone: 'Σάλα', status: 'FREE', currentTotal: 0 },
+      { id: `${storeId}_t2`, tenantId, storeId, number: 2, tableNumber: 2, seats: 2, section: 'INDOOR', zone: 'Σάλα', status: 'FREE', currentTotal: 0 },
+      { id: `${storeId}_t3`, tenantId, storeId, number: 3, tableNumber: 3, seats: 6, section: 'INDOOR', zone: 'Σάλα', status: 'FREE', currentTotal: 0 },
+      { id: `${storeId}_t4`, tenantId, storeId, number: 4, tableNumber: 4, seats: 4, section: 'OUTDOOR', zone: 'Αυλή', status: 'FREE', currentTotal: 0 },
+      { id: `${storeId}_t5`, tenantId, storeId, number: 5, tableNumber: 5, seats: 4, section: 'OUTDOOR', zone: 'Αυλή', status: 'FREE', currentTotal: 0 },
+      { id: `${storeId}_t6`, tenantId, storeId, number: 6, tableNumber: 6, seats: 2, section: 'BAR', zone: 'Bar', status: 'FREE', currentTotal: 0 },
+      { id: `${storeId}_takeaway-counter`, tenantId, storeId, number: 99, tableNumber: 99, seats: 1, section: 'TAKEAWAY', zone: 'Παραλαβή', status: 'FREE', currentTotal: 0 }
+    ];
+  }
+
+  /**
+   * Initialize Firestore listeners for tables and active floor orders, strictly store-isolated
    */
   public initFirestoreSync(dbInstance: Firestore | null, getCurrentEmployeeFn: () => Employee | null): void {
     if (!dbInstance) return;
     this.db = dbInstance;
 
-    onSnapshot(collection(this.db, 'tables'), (snap) => {
+    if (this.activeTablesUnsub) {
+      this.activeTablesUnsub();
+    }
+
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+    const initialDefaultTables = this.getInitialDefaultTables(tenantId, storeId);
+
+    const tablesQuery = query(
+      collection(this.db, 'tables'),
+      where('tenantId', '==', tenantId),
+      where('storeId', '==', storeId)
+    );
+
+    this.activeTablesUnsub = onSnapshot(tablesQuery, (snap) => {
       const cloudTableMap = new Map<string, Table>();
       const newlyServedItems: { tableId: string; tableNumber: number; zone: string; itemSummary: string }[] = [];
       const extractedActiveOrders: ActiveOrder[] = [];
@@ -126,32 +182,18 @@ export class TableOrderService {
         });
       }
 
-      const mergedList = INITIAL_TABLES.map(initTable => {
-        const cloudTable = cloudTableMap.get(initTable.id);
-        if (cloudTable) {
-          const isFree = cloudTable.status === 'FREE';
-          return {
-            ...initTable,
-            ...cloudTable,
-            status: isFree ? 'FREE' : cloudTable.status,
-            currentTotal: isFree ? 0 : (cloudTable.currentTotal || 0),
-            activeOrder: isFree ? undefined : cloudTable.activeOrder
-          };
-        }
-        return initTable;
-      });
-
-      cloudTableMap.forEach((cloudTable, id) => {
-        if (!mergedList.some(t => t.id === id)) {
-          const isFree = cloudTable.status === 'FREE';
-          mergedList.push({
-            ...cloudTable,
-            status: isFree ? 'FREE' : cloudTable.status,
-            currentTotal: isFree ? 0 : (cloudTable.currentTotal || 0),
-            activeOrder: isFree ? undefined : cloudTable.activeOrder
+      let mergedList: Table[] = [];
+      if (cloudTableMap.size > 0) {
+        cloudTableMap.forEach(cloudTable => mergedList.push(cloudTable));
+      } else {
+        mergedList = [...initialDefaultTables];
+        // Populate initial tables in DB if in demo mode
+        if (tenantId === 'coffee-shop-demo') {
+          initialDefaultTables.forEach(t => {
+            setDoc(doc(this.db!, 'tables', t.id), cleanUndefined(t)).catch(() => {});
           });
         }
-      });
+      }
 
       mergedList.sort((a, b) => (a.number || a.tableNumber || 0) - (b.number || b.tableNumber || 0));
       this.tables.set(mergedList);
@@ -167,19 +209,20 @@ export class TableOrderService {
     }, (err) => console.warn('Tables sync warning:', err));
   }
 
-// --- NOTIFICATIONS ---
+  // --- NOTIFICATIONS ---
 
   private addReadyNotification(notif: { tableId: string; tableNumber: number; zone: string; itemSummary: string }): void {
+    const { storeId } = this.getActiveTenantAndStore();
+
     const fullNotif: ReadyNotification = {
       ...notif,
       id: `NOTIF-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      storeId,
       readyAt: new Date().toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' })
     };
 
-    // 1. Add notification to active list
     this.unreadReadyNotifications.update(list => [fullNotif, ...list]);
 
-    // 2. Auto-dismiss automatically after 2 seconds (2000ms)
     setTimeout(() => {
       this.dismissNotification(fullNotif.id);
     }, 2000);
@@ -195,7 +238,61 @@ export class TableOrderService {
     );
   }
 
-  // --- FLOOR PLAN MANAGEMENT ---
+  // --- FLOOR PLAN & CART ---
+
+  private areModifiersEqual(m1: SelectedModifier[] = [], m2: SelectedModifier[] = []): boolean {
+    if (m1.length !== m2.length) return false;
+    const ids1 = m1.map(m => m.optionId).sort();
+    const ids2 = m2.map(m => m.optionId).sort();
+    return ids1.every((id, index) => id === ids2[index]);
+  }
+
+  public addToCart(product: Product, selectedModifiers: SelectedModifier[] = [], price: number): void {
+    const currentItems = this.cartItems();
+
+    const existingItemIndex = currentItems.findIndex(item => 
+      item.product.id === product.id && 
+      this.areModifiersEqual(item.selectedModifiers, selectedModifiers)
+    );
+
+    if (existingItemIndex > -1) {
+      const updated = [...currentItems];
+      updated[existingItemIndex].quantity += 1;
+      this.cartItems.set(updated);
+    } else {
+      this.cartItems.set([
+        ...currentItems,
+        { product, selectedModifiers, price, quantity: 1 }
+      ]);
+    }
+  }
+
+  public removeOrderItem(tableId: string, itemId: string): void {
+    this.tables.update(tables => tables.map(table => {
+      if (table.id !== tableId || !table.activeOrder) return table;
+
+      const updatedItems = (table.activeOrder.items || []).filter(item => item.id !== itemId);
+
+      const grandTotal = updatedItems
+        .filter(item => item.status !== 'VOIDED')
+        .reduce((sum, item) => sum + ((item.finalItemPrice || item.unitPrice || 0) * item.quantity), 0);
+
+      const subtotalNet = Number((grandTotal / 1.13).toFixed(2));
+      const totalTax = Number((grandTotal - subtotalNet).toFixed(2));
+
+      return {
+        ...table,
+        currentTotal: grandTotal,
+        activeOrder: {
+          ...table.activeOrder,
+          items: updatedItems,
+          subtotalNet,
+          totalTax,
+          grandTotal
+        }
+      };
+    }));
+  }
 
   public addTable(data: { number: number; seats?: number; section?: string; zone?: string }): { success: boolean; message: string; table?: Table } {
     const num = Number(data.number);
@@ -208,8 +305,12 @@ export class TableOrderService {
       return { success: false, message: `Υπάρχει ήδη τραπέζι με αριθμό #${num}!` };
     }
 
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+
     const newTable: Table = {
-      id: `t_${Date.now()}`,
+      id: `t_${storeId}_${Date.now()}`,
+      tenantId,
+      storeId,
       number: num,
       tableNumber: num,
       name: `Τραπέζι ${num}`,
@@ -276,8 +377,27 @@ export class TableOrderService {
 
   // --- ORDER MANAGEMENT ---
 
-  public addOrderItemToTable(tableId: string, product: Product, modifiers: OrderModifier[] = [], notes: string = '', waiterEmp?: Employee | null): void {
-    const waiter = waiterEmp || { id: 'WAITER_1', name: 'Σερβιτόρος' };
+  public addOrderItemToTable(
+    tableId: string, 
+    product: Product, 
+    modifiers: OrderModifier[] = [], 
+    notes: string = '', 
+    waiter?: Employee | null
+  ): void {
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+
+    const fallbackWaiter: Employee = {
+      id: 'EMP-SYSTEM',
+      name: 'Σερβιτόρος',
+      pin: '0000',
+      role: 'WAITER',
+      hourlyRate: 0,
+      isActive: true,
+      tenantId,
+      storeId
+    };
+
+    const activeWaiter = waiter || fallbackWaiter;
     const extraCost = modifiers.reduce((acc, m) => acc + (m.priceExtra || 0), 0);
     const finalPrice = product.price + extraCost;
 
@@ -303,8 +423,8 @@ export class TableOrderService {
       modifiers,
       finalItemPrice: finalPrice,
       itemNotes: notes,
-      orderedByWaiterId: waiter.id,
-      orderedByWaiterName: waiter.name,
+      orderedByWaiterId: activeWaiter.id,
+      orderedByWaiterName: activeWaiter.name,
       timestamp: new Date().toISOString(),
       status: 'PENDING'
     };
@@ -318,10 +438,10 @@ export class TableOrderService {
     const updatedT: Table = {
       ...table,
       status: 'OCCUPIED',
-      waiterId: waiter.id,
-      assignedWaiterId: waiter.id,
-      waiterName: waiter.name,
-      assignedWaiterName: waiter.name,
+      waiterId: activeWaiter.id,
+      assignedWaiterId: activeWaiter.id,
+      waiterName: activeWaiter.name,
+      assignedWaiterName: activeWaiter.name,
       currentTotal: grandTotal,
       activeOrder: { ...existingOrder, items: updatedItems, subtotalNet, totalTax, grandTotal }
     };
@@ -517,12 +637,27 @@ export class TableOrderService {
     const table = this.tables().find(t => t.id === tableId);
     if (!table) return;
 
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
     const grandTotal = table.activeOrder?.grandTotal || table.currentTotal || 0;
     const tableNum = table.number || table.tableNumber || 0;
-    const waiter = currentEmp || { id: 'WAITER', name: 'Σερβιτόρος' };
+
+    const fallbackWaiter: Employee = {
+      id: 'EMP-SYSTEM',
+      name: 'Σερβιτόρος',
+      pin: '0000',
+      role: 'WAITER',
+      hourlyRate: 0,
+      isActive: true,
+      tenantId,
+      storeId
+    };
+
+    const waiter = currentEmp || fallbackWaiter;
 
     const saleRecord: SaleRecord = {
       id: `SALE-${Date.now()}`,
+      tenantId: currentEmp?.tenantId || table.tenantId || tenantId,
+      storeId: currentEmp?.storeId || table.storeId || storeId,
       orderId: table.activeOrder?.orderId || `ORD-${Date.now()}`,
       tableId: table.id,
       tableNumber: tableNum,

@@ -1,15 +1,16 @@
-import { Component, inject, signal, computed, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
+import { Component, inject, signal, computed, OnInit, OnDestroy, ChangeDetectionStrategy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule, DatePipe, CurrencyPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
-import { DailyZReportSnapshot } from '../../core/models/restaurant-pos.models';
+import { DailyZReportSnapshot } from '../../core/modals/restaurant-pos.modals';
 import { ThermalPrinterService } from '../../core/services/thermal-printer.service';
 import { 
   AuditLog, 
   WorkShiftLog, 
-  WaiterVaultSession 
-} from '../../core/models/restaurant-pos.models';
+  WaiterVaultSession,
+  Employee 
+} from '../../core/modals/restaurant-pos.modals';
 
 @Component({
   selector: 'app-shift-reports',
@@ -45,7 +46,7 @@ import {
           <button (click)="activeTab.set('VAULTS')"
                   class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer"
                   [ngClass]="activeTab() === 'VAULTS' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
-            👛 Ταμεία & Βάρδιες
+            👛 Ταμεία & Βάρδιες ({{ activeVaults().length }})
           </button>
           <button (click)="activeTab.set('AUDIT')"
                   class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer"
@@ -70,15 +71,15 @@ import {
               <div class="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl flex flex-col justify-between">
                 <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Ζωντανός Τζίρος Σάλας</span>
                 <div class="mt-3">
-                  <span class="text-3xl font-black text-emerald-400">€{{ posService.totalLiveFloorRevenue().toFixed(2) }}</span>
-                  <span class="text-[10px] text-slate-400 block mt-1">Από {{ posService.occupiedTables().length }} ενεργά τραπέζια</span>
+                  <span class="text-3xl font-black text-emerald-400">€{{ liveFloorRevenue().toFixed(2) }}</span>
+                  <span class="text-[10px] text-slate-400 block mt-1">Από {{ occupiedTablesCount() }} ενεργά τραπέζια</span>
                 </div>
               </div>
 
               <div class="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl flex flex-col justify-between">
                 <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Εισπράξεις Μετρητών</span>
                 <div class="mt-3">
-                  <span class="text-3xl font-black text-amber-400">€{{ posService.totalDailyCashInVaults().toFixed(2) }}</span>
+                  <span class="text-3xl font-black text-amber-400">€{{ totalCashInVaults().toFixed(2) }}</span>
                   <span class="text-[10px] text-slate-400 block mt-1">Στα πορτοφόλια σερβιτόρων</span>
                 </div>
               </div>
@@ -86,7 +87,7 @@ import {
               <div class="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl flex flex-col justify-between">
                 <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Εισπράξεις Καρτών (POS)</span>
                 <div class="mt-3">
-                  <span class="text-3xl font-black text-sky-400">€{{ posService.totalDailyCardInVaults().toFixed(2) }}</span>
+                  <span class="text-3xl font-black text-sky-400">€{{ totalCardInVaults().toFixed(2) }}</span>
                   <span class="text-[10px] text-slate-400 block mt-1">Ηλεκτρονικές συναλλαγές</span>
                 </div>
               </div>
@@ -94,7 +95,7 @@ import {
               <div class="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl flex flex-col justify-between">
                 <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Συνολικός ΦΠΑ (13% & 24%)</span>
                 <div class="mt-3">
-                  <span class="text-3xl font-black text-purple-400">€{{ posService.vatBreakdown().totalVat.toFixed(2) }}</span>
+                  <span class="text-3xl font-black text-purple-400">€{{ vatData().totalVat.toFixed(2) }}</span>
                   <span class="text-[10px] text-slate-400 block mt-1">Υποχρέωση ΦΠΑ σήμερα</span>
                 </div>
               </div>
@@ -131,24 +132,24 @@ import {
                   <span class="font-bold text-amber-400 uppercase tracking-wider border-b border-slate-800 pb-2">1. Ανάλυση Εισπράξεων & Ταμείου</span>
                   <div class="flex justify-between items-center text-slate-300">
                     <span>Αρχικά Ρέστα (Starting Floats):</span>
-                    <span class="font-bold text-white">€{{ posService.totalDailyStartingFloats().toFixed(2) }}</span>
+                    <span class="font-bold text-white">€{{ totalStartingFloats().toFixed(2) }}</span>
                   </div>
                   <div class="flex justify-between items-center text-slate-300">
                     <span>Eισπράξεις Μετρητών:</span>
-                    <span class="font-bold text-emerald-400">€{{ posService.totalDailyCashInVaults().toFixed(2) }}</span>
+                    <span class="font-bold text-emerald-400">€{{ totalCashInVaults().toFixed(2) }}</span>
                   </div>
                   <div class="flex justify-between items-center text-slate-300">
                     <span>Εισπράξεις Καρτών / POS:</span>
-                    <span class="font-bold text-sky-400">€{{ posService.totalDailyCardInVaults().toFixed(2) }}</span>
+                    <span class="font-bold text-sky-400">€{{ totalCardInVaults().toFixed(2) }}</span>
                   </div>
                   <div class="flex justify-between items-center pt-2 border-t border-slate-800 font-black text-sm text-white">
                     <span>Σύνολο Ακαθάριστων Εισπράξεων:</span>
-                    <span class="text-emerald-400">€{{ posService.totalDailyGrossSales().toFixed(2) }}</span>
+                    <span class="text-emerald-400">€{{ totalGrossSales().toFixed(2) }}</span>
                   </div>
                 </div>
 
                 <!-- EXACT GREEK VAT BREAKDOWN -->
-                @let vat = posService.vatBreakdown();
+                @let vat = vatData();
                 <div class="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
                   <span class="font-bold text-purple-400 uppercase tracking-wider border-b border-slate-800 pb-2">2. Ανάλυση Συντελεστών ΦΠΑ & Καθαρά Έσοδα</span>
                   <div class="flex justify-between items-center text-slate-300">
@@ -177,7 +178,7 @@ import {
             </div>
 
             <!-- HISTORICAL ARCHIVED Z-REPORTS -->
-            @if (posService.zReports().length > 0) {
+            @if (zReportsList().length > 0) {
               <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col gap-4">
                 <h3 class="text-xs font-black text-amber-400 uppercase tracking-wider m-0">📜 Ιστορικό Αρχειοθετημένων Z-Reports</h3>
                 
@@ -196,7 +197,7 @@ import {
                       </tr>
                     </thead>
                     <tbody>
-                      @for (z of posService.zReports(); track z.id) {
+                      @for (z of zReportsList(); track z.id) {
                         <tr class="border-b border-slate-800/60 hover:bg-slate-800/40 transition-colors">
                           <td class="py-3 px-3 font-bold text-white">{{ z.dateStr }} ({{ z.timestamp | date:'shortTime' }})</td>
                           <td class="py-3 px-3 text-slate-300">{{ z.closedByEmployeeName }}</td>
@@ -231,13 +232,13 @@ import {
             <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col gap-5">
               <div class="flex justify-between items-center border-b border-slate-800 pb-4">
                 <div>
-                  <h2 class="text-base font-black text-white uppercase tracking-wider m-0">👛 Ενεργά Ταμεία Σερβιτόρων ({{ posService.activeVaultSessions().length }})</h2>
+                  <h2 class="text-base font-black text-white uppercase tracking-wider m-0">👛 Ενεργά Ταμεία Σερβιτόρων ({{ activeVaults().length }})</h2>
                   <span class="text-xs text-slate-400">Έλεγχος υπολοίπων σε πραγματικό χρόνο, τροποποίηση αρχικού ταμείου & παράδοση</span>
                 </div>
               </div>
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                @for (vault of posService.activeVaultSessions(); track vault.id) {
+                @for (vault of activeVaults(); track vault.id) {
                   <div class="bg-slate-950 border-2 border-amber-500/60 rounded-2xl p-5 flex flex-col justify-between gap-4">
                     <div class="flex justify-between items-start border-b border-slate-800 pb-3">
                       <div>
@@ -322,8 +323,8 @@ import {
                     </tr>
                   </thead>
                   <tbody>
-                    @for (emp of posService.employees(); track emp.id) {
-                      @let activeShift = posService.getEmployeeActiveShift(emp.id);
+                    @for (emp of employeesList(); track emp.id) {
+                      @let activeShift = getShiftForEmployee(emp.id);
                       @let hours = calculateShiftHours(activeShift);
                       @let wage = hours * (emp.hourlyRate || 0);
                       
@@ -372,7 +373,7 @@ import {
                 <span class="text-xs text-slate-400">Καταγραφή ακυρώσεων, μεταφορών τραπεζιών, κλεισιμάτων και πληρωμών</span>
               </div>
               <span class="text-xs font-bold text-amber-400 bg-slate-800 px-3 py-1 rounded-full border border-slate-700">
-                {{ posService.auditLogs().length }} Εγγραφές
+                {{ auditLogsList().length }} Εγγραφές
               </span>
             </div>
 
@@ -388,7 +389,7 @@ import {
                   </tr>
                 </thead>
                 <tbody>
-                  @for (log of posService.auditLogs(); track log.id) {
+                  @for (log of auditLogsList(); track log.id) {
                     <tr class="border-b border-slate-800/60 hover:bg-slate-800/40 transition-colors">
                       <td class="py-3 px-3 text-slate-400 font-mono">{{ log.timestamp | date:'mediumTime' }}</td>
                       <td class="py-3 px-3 font-bold text-white">{{ log.employeeName }}</td>
@@ -479,22 +480,48 @@ import {
 export class ShiftReportsComponent implements OnInit, OnDestroy {
   public posService = inject(RestaurantPosService);
   private printerService = inject(ThermalPrinterService);
-  public activeTab = signal<'Z_REPORT' | 'VAULTS' | 'AUDIT'>('Z_REPORT');
+  private cdr = inject(ChangeDetectorRef);
 
+  public activeTab = signal<'Z_REPORT' | 'VAULTS' | 'AUDIT'>('Z_REPORT');
   public closingVault = signal<WaiterVaultSession | null>(null);
   public actualHandedCash: number = 0;
   public now = signal<number>(Date.now());
 
+  // 🔒 Direct computed signals to guarantee OnPush view reactivity
+  public activeVaults = computed(() => this.posService.activeVaultSessions());
+  public employeesList = computed(() => this.posService.employees());
+  public workShiftsList = computed(() => this.posService.workShifts());
+  public zReportsList = computed(() => this.posService.zReports());
+  public auditLogsList = computed(() => this.posService.auditLogs());
+  public vatData = computed(() => this.posService.vatBreakdown());
+  public liveFloorRevenue = computed(() => this.posService.totalLiveFloorRevenue());
+  public occupiedTablesCount = computed(() => this.posService.occupiedTables().length);
+  public totalCashInVaults = computed(() => this.posService.totalDailyCashInVaults());
+  public totalCardInVaults = computed(() => this.posService.totalDailyCardInVaults());
+  public totalStartingFloats = computed(() => this.posService.totalDailyStartingFloats());
+  public totalGrossSales = computed(() => this.posService.totalDailyGrossSales());
+
   private timerInterval: any;
 
   ngOnInit(): void {
+    const currentEmp = this.posService.currentEmployee();
+    if (currentEmp) {
+      // Re-trigger live store sync to attach listeners for Tirane kafe 1974
+      this.posService.reconnectActiveStoreSync(currentEmp);
+    }
+
     this.timerInterval = setInterval(() => {
       this.now.set(Date.now());
+      this.cdr.markForCheck();
     }, 30000);
   }
 
   ngOnDestroy(): void {
     if (this.timerInterval) clearInterval(this.timerInterval);
+  }
+
+  public getShiftForEmployee(empId: string): WorkShiftLog | undefined {
+    return this.posService.getEmployeeActiveShift(empId);
   }
 
   public calculateShiftHours(activeShift: WorkShiftLog | undefined | null): number {
@@ -519,48 +546,47 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
       const parsed = parseFloat(input);
       if (!isNaN(parsed) && parsed >= 0) {
         this.posService.updateWaiterVaultFloat(vault.id, parsed);
+        this.cdr.markForCheck();
       }
     }
   }
 
   public openCloseVaultModal(vault: WaiterVaultSession): void {
     this.closingVault.set(vault);
-    this.actualHandedCash = vault.startingFloat + vault.cashCollected;
+    this.actualHandedCash = Number((vault.startingFloat + vault.cashCollected).toFixed(2));
+    this.cdr.markForCheck();
   }
 
   public confirmVaultClose(vault: WaiterVaultSession): void {
-    const expected = vault.startingFloat + vault.cashCollected;
-    const variance = this.actualHandedCash - expected;
+    const expected = Number((vault.startingFloat + vault.cashCollected).toFixed(2));
+    const count = Number(this.actualHandedCash) || 0;
+    const variance = Number((count - expected).toFixed(2));
 
     // 1. Print Receipt
-    this.printVaultReceipt(vault, this.actualHandedCash);
+    this.printVaultReceipt(vault, count);
 
-    // 2. Log Audit Event
-    this.posService.logAudit(
-      'VAULT_CLOSED', 
-      `Κλείσιμο ταμείου ${vault.waiterName}. Παραδόθηκαν: €${this.actualHandedCash.toFixed(2)} (Απόκλιση: €${variance.toFixed(2)})`
-    );
-
-    // 3. Delegate Vault Close & Employee Clock-Out to POS Service
+    // 2. Delegate Vault Close & Employee Clock-Out to POS Service
     const closedVault: WaiterVaultSession = {
       ...vault,
       closedAt: new Date().toISOString(),
       expectedCash: expected,
-      cashHandedOver: this.actualHandedCash,
+      cashHandedOver: count,
       cashVariance: variance,
       status: 'CLOSED'
     };
 
     this.posService.closeWaiterVaultSession(closedVault);
 
-    // 4. Close Modal
+    // 3. Close Modal & force view update
     this.closingVault.set(null);
+    this.cdr.markForCheck();
   }
 
   public closeBusinessDay(): void {
     if (confirm('Είστε βέβαιοι για το Κλείσιμο Ημέρας; Θα δημιουργηθεί μόνιμο snapshot Z-Report.')) {
       const snapshot = this.posService.closeDayAndGenerateZReport();
       this.printSnapshotZReport(snapshot);
+      this.cdr.markForCheck();
     }
   }
 

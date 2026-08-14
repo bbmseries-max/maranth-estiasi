@@ -18,7 +18,7 @@ export const routes: Routes = [
     loadComponent: () => import('./features/floor-plan/floor-plan.component')
       .then(m => m.FloorPlanComponent),
     canActivate: [roleGuard],
-    data: { roles: ['MANAGER', 'ADMIN', 'OWNER', 'WAITER', 'HEAD_WAITER'] },
+    data: { roles: ['BARISTA', 'MANAGER', 'ADMIN', 'OWNER', 'WAITER', 'HEAD_WAITER'] },
     title: 'Maranth Estiasi - Πλάνο Τραπεζιών'
   },
   {
@@ -26,7 +26,7 @@ export const routes: Routes = [
     loadComponent: () => import('./features/pos/order-terminal.component')
       .then(m => m.OrderTerminalComponent),
     canActivate: [roleGuard],
-    data: { roles: ['MANAGER', 'ADMIN', 'OWNER', 'WAITER', 'HEAD_WAITER'] },
+    data: { roles: ['MANAGER', 'BARISTA', 'ADMIN', 'OWNER', 'WAITER', 'HEAD_WAITER'] },
     title: 'Maranth Estiasi - Παραγγελιοληψία'
   },
   {
@@ -34,7 +34,7 @@ export const routes: Routes = [
     loadComponent: () => import('./features/kitchen/kds-display.component')
       .then(m => m.KdsDisplayComponent),
     canActivate: [roleGuard],
-    data: { roles: ['MANAGER', 'ADMIN', 'OWNER', 'BARISTA', 'KITCHEN'] },
+    data: { roles: ['BAR', 'BARISTA', 'MANAGER', 'ADMIN', 'OWNER', 'KITCHEN'] },
     title: 'Maranth Estiasi - Οθόνη Κουζίνας & Bar'
   },
   {
@@ -47,7 +47,11 @@ export const routes: Routes = [
   },
   {
     path: 'staff',
-    loadComponent: () => import('./features/staff/staff-management.component').then(m => m.StaffManagementComponent)
+    loadComponent: () => import('./features/staff/staff-management.component')
+      .then(m => m.StaffManagementComponent),
+    canActivate: [roleGuard],
+    data: { roles: ['MANAGER', 'ADMIN', 'OWNER'] },
+    title: 'Maranth Estiasi - Προσωπικό'
   },
   {
     path: 'reports',
@@ -56,6 +60,14 @@ export const routes: Routes = [
     canActivate: [roleGuard],
     data: { roles: ['MANAGER', 'ADMIN', 'OWNER'] },
     title: 'Maranth Estiasi - Z-Report'
+  },
+  {
+    path: 'settings',
+    loadComponent: () => import('./features/settings/settings.component')
+      .then(m => m.SettingsComponent),
+    canActivate: [roleGuard],
+    data: { roles: ['MANAGER', 'ADMIN', 'OWNER'] },
+    title: 'Maranth Estiasi - Settings'
   },
   {
     path: '**',

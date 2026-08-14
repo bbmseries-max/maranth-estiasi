@@ -1,7 +1,10 @@
-import { Component, inject, signal, computed, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
+// src/app/features/kds/kds-display.component.ts
+
+import { Component, inject, signal, computed, OnInit, OnDestroy, ChangeDetectionStrategy, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
-import { TableOrderItem, ItemPreparationStatus, OrderStatus } from '../../core/models/restaurant-pos.models';
+
+import { TableOrderItem, ItemPreparationStatus, OrderStatus } from '../../core/modals';
 
 interface KitchenTicket {
   tableNumber: number;
@@ -21,8 +24,29 @@ interface KitchenTicket {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [CommonModule],
   template: `
-    <div class="min-h-screen bg-slate-950 p-4 text-slate-100 font-sans select-none">
+    <div class="min-h-screen bg-slate-950 p-4 text-slate-100 font-sans select-none relative">
       
+      <!-- VOID ALERTS OVERLAY -->
+      @if (activeVoidAlerts().length > 0) {
+        <div class="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-full max-w-lg px-4">
+          @for (alert of activeVoidAlerts(); track alert.id) {
+            <div class="bg-red-600 text-white p-4 rounded-2xl shadow-2xl border-2 border-red-400 animate-pulse flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <span class="text-2xl">🚫</span>
+                <div>
+                  <h4 class="font-black text-sm uppercase m-0">ΑΚΥΡΩΣΗ - Τραπέζι #{{ alert.tableNumber }}</h4>
+                  <p class="text-xs font-bold text-red-100 m-0">{{ alert.itemName }} {{ alert.reason ? '(' + alert.reason + ')' : '' }}</p>
+                </div>
+              </div>
+              <button (click)="acknowledgeVoid(alert.id)" 
+                      class="px-3 py-1.5 bg-white text-red-700 font-black text-xs rounded-xl hover:bg-red-50 transition-all cursor-pointer">
+                OK / Ελήφθη
+              </button>
+            </div>
+          }
+        </div>
+      }
+
       <!-- KDS BAR/KITCHEN HEADER & FILTERS -->
       <div class="flex flex-col sm:flex-row justify-between items-center bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-4 gap-3 shadow-lg">
         <div class="flex items-center gap-3">
@@ -78,7 +102,7 @@ interface KitchenTicket {
                 </span>
               </div>
 
-              <!-- OVERALL TICKET ORDER NOTE ALERT BADGE -->
+              <!-- ORDER NOTE ALERT -->
               @if (ticket.notes) {
                 <div class="bg-amber-500/20 border-l-4 border-amber-500 text-amber-300 p-3 text-xs font-bold rounded-r-xl break-words">
                   ⚠️ ΣΗΜΕΙΩΣΗ ΠΑΡΑΓΓΕΛΙΑΣ: {{ ticket.notes }}
@@ -106,7 +130,7 @@ interface KitchenTicket {
                       </button>
                     </div>
 
-                    <!-- COFFEE / ITEM MODIFIERS -->
+                    <!-- MODIFIERS -->
                     @if (item.modifiers && item.modifiers.length > 0) {
                       <div class="flex flex-wrap gap-1.5 pl-9">
                         @for (mod of item.modifiers; track mod.id) {
@@ -117,31 +141,11 @@ interface KitchenTicket {
                       </div>
                     }
 
-                    <!-- ITEM SPECIFIC CUSTOMER REQUEST NOTE -->
+                    <!-- ITEM SPECIFIC NOTE -->
                     @if (item.itemNotes) {
                       <div class="text-xs font-bold text-rose-400 italic pl-9 break-words">
                         ↳ Request: "{{ item.itemNotes }}"
                       </div>
-                    }
-
-                    @if (activeVoidAlerts().length > 0) {
-  <div class="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-full max-w-lg px-4">
-    @for (alert of activeVoidAlerts(); track alert.id) {
-      <div class="bg-red-600 text-white p-4 rounded-2xl shadow-2xl border-2 border-red-400 animate-pulse flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <span class="text-2xl">🚫</span>
-          <div>
-            <h4 class="font-black text-sm uppercase m-0">ΑΚΥΡΩΣΗ - Τραπέζι #{{ alert.tableNumber }}</h4>
-            <p class="text-xs font-bold text-red-100 m-0">{{ alert.itemName }} {{ alert.reason ? '(' + alert.reason + ')' : '' }}</p>
-          </div>
-        </div>
-        <button (click)="acknowledgeVoid(alert.id)" 
-                class="px-3 py-1.5 bg-white text-red-700 font-black text-xs rounded-xl hover:bg-red-50 transition-all cursor-pointer">
-          OK / Ελήφθη
-        </button>
-      </div>
-    }
-  </div>
                     }
                   </div>
                 }
@@ -169,8 +173,11 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
   public posService = inject(RestaurantPosService);
   public stationFilter = signal<'ALL' | 'BAR' | 'KITCHEN'>('ALL');
   public now = signal<number>(Date.now());
+  public activeVoidAlerts = signal<Array<{ id: string; tableNumber: number; itemName: string; reason?: string }>>([]);
 
   private timerInterval: any;
+  private knownItemStateMap = new Map<string, ItemPreparationStatus>();
+  private isInitialLoad = true;
 
   public activeTickets = computed<KitchenTicket[]>(() => {
     const tables = this.posService.tables();
@@ -227,11 +234,44 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
     }).filter((t): t is KitchenTicket => t !== null);
   });
 
+  constructor() {
+    // 🔔 Real-time automated Void Alert Monitor
+    effect(() => {
+      const tables = this.posService.tables();
+      if (tables.length === 0) return;
+
+      for (const table of tables) {
+        if (table.activeOrder?.items) {
+          for (const item of table.activeOrder.items) {
+            const previousStatus = this.knownItemStateMap.get(item.id);
+            this.knownItemStateMap.set(item.id, item.status);
+
+            // Trigger alert if an item previously sent/preparing gets voided remotely
+            if (!this.isInitialLoad && previousStatus && previousStatus !== 'VOIDED' && item.status === 'VOIDED') {
+              this.handleVoidNotification({
+                id: `VOID-${Date.now()}-${item.id}`,
+                tableNumber: table.tableNumber || table.number,
+                itemName: `${item.quantity}x ${item.productName}`,
+                reason: item.itemNotes || 'Ακύρωση από σερβιτόρο'
+              });
+            }
+          }
+        }
+      }
+
+      if (this.isInitialLoad) {
+        this.isInitialLoad = false;
+      }
+    });
+  }
+
   ngOnInit(): void {
     const emp = this.posService.currentEmployee();
-    if (emp?.role === 'BARISTA' || emp?.role === 'BAR') {
+    const role = (emp?.role as string)?.toUpperCase();
+
+    if (role === 'BARMAN' || role === 'BARISTA') {
       this.stationFilter.set('BAR');
-    } else if (emp?.role === 'KITCHEN') {
+    } else if (role === 'KITCHEN' || role === 'CHEF') {
       this.stationFilter.set('KITCHEN');
     }
 
@@ -293,22 +333,16 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
     this.posService.completeKitchenTicket(ticket.orderId, ticket.tableId);
   }
 
-  // Add to KitchenDisplayComponent state:
-public activeVoidAlerts = signal<Array<{ id: string; tableNumber: number; itemName: string; reason?: string }>>([]);
+  public handleVoidNotification(voidData: { id: string; tableNumber: number; itemName: string; reason?: string }): void {
+    try {
+      const audio = new Audio('assets/sounds/void-alert.mp3');
+      audio.play().catch(() => {});
+    } catch (e) {}
 
-// 1. Play audio chime and trigger pulsing alert when order is voided
-public handleVoidNotification(voidData: { id: string; tableNumber: number; itemName: string; reason?: string }): void {
-  // Sound alert
-  const audio = new Audio('assets/sounds/void-alert.mp3');
-  audio.play().catch(() => /* Autoplay policy handler */ {});
+    this.activeVoidAlerts.update(alerts => [voidData, ...alerts]);
+  }
 
-  // Add to active alerts
-  this.activeVoidAlerts.update(alerts => [voidData, ...alerts]);
-}
-
-// 2. Kitchen Staff Acknowledgment (Clears the alert)
-public acknowledgeVoid(alertId: string): void {
-  this.activeVoidAlerts.update(alerts => alerts.filter(a => a.id !== alertId));
-}
-
+  public acknowledgeVoid(alertId: string): void {
+    this.activeVoidAlerts.update(alerts => alerts.filter(a => a.id !== alertId));
+  }
 }
