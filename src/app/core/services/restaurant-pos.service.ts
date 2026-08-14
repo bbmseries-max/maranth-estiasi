@@ -97,39 +97,74 @@ export class RestaurantPosService {
   public occupiedTables = this.tableOrderService.occupiedTables;
 
   // --- OCCUPIED TABLES COUNT ---
- public occupiedTablesCount = computed(() => {
-  const currentTenant = this.tenantContext.currentTenantId();
-  return this.tables().filter(t => {
-    const matchTenant = !t.tenantId || t.tenantId === currentTenant;
-    const isOccupied = t.status !== 'FREE' && t.status !== 'AVAILABLE';
-    return matchTenant && isOccupied;
-  }).length;
-});
+// --- OCCUPIED TABLES COUNT ---
+  public occupiedTablesCount = computed(() => {
+    const currentTenant = this.tenantContext.currentTenantId();
+    const tablesList = this.tables();
+    
+    // 1. Count occupied tables
+    const occupiedFromTables = tablesList.filter(t => {
+      const matchTenant = !t.tenantId || t.tenantId === currentTenant;
+      const isOccupied = t.status !== 'FREE' && t.status !== 'AVAILABLE';
+      return matchTenant && isOccupied;
+    }).length;
+
+    // 2. Fallback: check activeOrders length
+    if (occupiedFromTables === 0 && this.activeOrders().length > 0) {
+      return this.activeOrders().length;
+    }
+
+    return occupiedFromTables;
+  });
 
   // --- LIVE FLOOR REVENUE CALCULATION ---
+ // --- LIVE FLOOR REVENUE CALCULATION ---
   public totalLiveFloorRevenue = computed(() => {
     const currentTenant = this.tenantContext.currentTenantId();
-    const activeTables = this.tables().filter(t => 
-      (!t.tenantId || t.tenantId === currentTenant) && 
-      t.status !== 'FREE' && 
-      t.status !== 'AVAILABLE'
-    );
-    
     let total = 0;
-    for (const table of activeTables) {
+
+    // 1. Inspect Table Embedded Active Orders
+    const storeTables = this.tables().filter(t => !t.tenantId || t.tenantId === currentTenant);
+
+    for (const table of storeTables) {
+      if (table.status === 'FREE' || table.status === 'AVAILABLE') {
+        continue;
+      }
+
       const orderObj = (table as any).activeOrder || (table as any).currentOrder || (table as any).order;
       const itemsList = orderObj?.items || (table as any).items || [];
 
       if (Array.isArray(itemsList) && itemsList.length > 0) {
         for (const item of itemsList) {
-          if (item.status !== 'VOIDED' && item.status !== 'CANCELLED') {
-            const price = Number(item.unitPrice || item.finalItemPrice || item.price || 0);
-            const qty = Number(item.quantity || 1);
+          if (item && item.status !== 'VOIDED' as any) {
+            const rawPrice = item.finalItemPrice ?? item.unitPrice ?? item.price ?? item.productPrice ?? 0;
+            const price = Number(rawPrice) || 0;
+            const qty = Number(item.quantity || item.qty || 1);
             total += price * qty;
           }
         }
-      } else if (orderObj && typeof orderObj.total === 'number') {
-        total += orderObj.total;
+      } else if (orderObj && typeof orderObj.total === 'number' && orderObj.total > 0) {
+        total += Number(orderObj.total);
+      }
+    }
+
+    // 2. Fallback: If table items were not attached directly to table objects, inspect activeOrders()
+    if (total === 0 && this.activeOrders().length > 0) {
+      const orders = this.activeOrders().filter(o => !o.tenantId || o.tenantId === currentTenant);
+
+      for (const order of orders) {
+        if (Array.isArray(order.items) && order.items.length > 0) {
+          for (const item of order.items) {
+            if (item && item.status !== 'VOIDED' as any) {
+              const rawPrice = item.finalItemPrice ?? item.unitPrice ?? item.unitPrice ?? 0;
+              const price = Number(rawPrice) || 0;
+              const qty = Number(item.quantity || 1);
+              total += price * qty;
+            }
+          }
+        } else if (typeof (order as any).total === 'number') {
+          total += Number((order as any).total);
+        }
       }
     }
 
