@@ -69,16 +69,41 @@ export class TableOrderService {
   private knownItemStatusMap = new Map<string, ItemPreparationStatus>();
   private isInitialTablesSync = true;
 
-  // Computations
-  public occupiedTables = computed(() => 
-    this.tables().filter(t => t.status === 'OCCUPIED' || t.status === 'BILL_PRINTED')
+ public occupiedTables = computed(() => 
+    this.tables().filter(t => {
+      const hasActiveItems = Boolean(
+        t.activeOrder?.items && 
+        t.activeOrder.items.some(i => (i as any).status !== 'VOIDED')
+      );
+      const isMarkedOccupied = t.status === 'OCCUPIED' || t.status === 'BILL_PRINTED';
+      const hasTotal = Number(t.currentTotal || t.activeOrder?.grandTotal || 0) > 0;
+
+      return (isMarkedOccupied || hasActiveItems || hasTotal) && t.status !== 'FREE';
+    })
   );
 
+  // --- SAFE TOTAL LIVE FLOOR REVENUE COMPUTATION ---
   public totalLiveFloorRevenue = computed(() => 
     this.tables().reduce((acc, t) => {
-      const isOccupied = t.status === 'OCCUPIED' || t.status === 'BILL_PRINTED';
-      const orderTotal = t.activeOrder?.grandTotal || t.currentTotal || 0;
-      return acc + (isOccupied ? orderTotal : 0);
+      // 1. Calculate from activeOrder items if available
+      const items = t.activeOrder?.items || [];
+      const calculatedItemsTotal = items
+        .filter(i => (i as any).status !== 'VOIDED')
+        .reduce((sum, i) => {
+          const itemPrice = Number(i.finalItemPrice || (i as any).unitPrice || (i as any).price || 0);
+          const qty = Number(i.quantity || 1);
+          return sum + (itemPrice * qty);
+        }, 0);
+
+      // 2. Fallbacks: direct grandTotal, currentTotal, or calculated sum
+      const orderTotal = calculatedItemsTotal > 0 
+        ? calculatedItemsTotal 
+        : Number(t.activeOrder?.grandTotal || t.currentTotal || 0);
+
+      const hasItems = items.length > 0;
+      const isOccupied = t.status === 'OCCUPIED' || t.status === 'BILL_PRINTED' || hasItems || orderTotal > 0;
+
+      return acc + (isOccupied && t.status !== 'FREE' ? orderTotal : 0);
     }, 0)
   );
 
@@ -145,18 +170,27 @@ export class TableOrderService {
       if (!snap.empty) {
         snap.forEach(docSnap => {
           const rawTable = docSnap.data() as any;
-          const isFree = !rawTable.status || rawTable.status === 'FREE' || rawTable.status === 'AVAILABLE';
+          
+          // Detect whether table genuinely has an active order
+          const hasActiveOrderItems = Boolean(
+            rawTable.activeOrder?.items && 
+            rawTable.activeOrder.items.length > 0
+          );
+          const hasPositiveTotal = Number(rawTable.currentTotal || rawTable.activeOrder?.grandTotal || 0) > 0;
+          const isExplicitlyFree = rawTable.status === 'FREE' && !hasActiveOrderItems && !hasPositiveTotal;
+
+          const activeStatus = isExplicitlyFree ? 'FREE' : (rawTable.status === 'BILL_PRINTED' ? 'BILL_PRINTED' : 'OCCUPIED');
 
           const t: Table = {
             ...rawTable,
-            status: isFree ? 'FREE' : rawTable.status,
-            currentTotal: isFree ? 0 : (rawTable.currentTotal || 0),
-            activeOrder: (isFree || !rawTable.activeOrder) ? undefined : rawTable.activeOrder,
-            activeOrderId: (isFree || !rawTable.activeOrderId) ? undefined : rawTable.activeOrderId,
-            waiterId: isFree ? undefined : rawTable.waiterId,
-            waiterName: isFree ? undefined : rawTable.waiterName,
-            assignedWaiterId: isFree ? undefined : rawTable.assignedWaiterId,
-            assignedWaiterName: isFree ? undefined : rawTable.assignedWaiterName
+            status: activeStatus,
+            currentTotal: isExplicitlyFree ? 0 : (rawTable.currentTotal || rawTable.activeOrder?.grandTotal || 0),
+            activeOrder: isExplicitlyFree ? undefined : rawTable.activeOrder,
+            activeOrderId: isExplicitlyFree ? undefined : rawTable.activeOrderId,
+            waiterId: isExplicitlyFree ? undefined : rawTable.waiterId,
+            waiterName: isExplicitlyFree ? undefined : rawTable.waiterName,
+            assignedWaiterId: isExplicitlyFree ? undefined : rawTable.assignedWaiterId,
+            assignedWaiterName: isExplicitlyFree ? undefined : rawTable.assignedWaiterName
           };
           cloudTableMap.set(t.id, t);
 
