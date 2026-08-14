@@ -1,0 +1,105 @@
+<!-- src/app/features/admin/employee-form/employee-form.component.html -->
+
+<div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl max-w-md mx-auto">
+  
+  <div class="flex items-center gap-4 mb-8 border-b border-slate-800 pb-4">
+    <div class="w-12 h-12 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-2xl shadow-inner">
+      👤
+    </div>
+    <div>
+      <h2 class="text-xl font-black text-white m-0">New Employee</h2>
+      <p class="text-xs text-slate-400 font-medium mt-0.5">Add staff to the current store</p>
+    </div>
+  </div>
+
+  <form (ngSubmit)="submitForm()" class="flex flex-col gap-5">
+    
+    <!-- Name Field -->
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-bold text-slate-400 uppercase tracking-wider pl-1">Full Name</label>
+      <input 
+        type="text" 
+        [ngModel]="name()" 
+        (ngModelChange)="name.set($event)" 
+        name="empName"
+        placeholder="e.g. Waiter Anna" 
+        class="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-4 py-3 text-sm font-bold text-white outline-none transition-all"
+        required
+      />
+    </div>
+
+    <!-- PIN & Hourly Rate Row -->
+    <div class="grid grid-cols-2 gap-4">
+      <div class="flex flex-col gap-1.5">
+        <label class="text-xs font-bold text-slate-400 uppercase tracking-wider pl-1">Access PIN</label>
+        <input 
+          type="text" 
+          [ngModel]="pinCode()" 
+          (ngModelChange)="pinCode.set($event)" 
+          name="empPin"
+          placeholder="e.g. 2026" 
+          maxlength="8"
+          class="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-4 py-3 text-sm font-bold font-mono text-amber-400 outline-none transition-all"
+          required
+        />
+      </div>
+
+      <div class="flex flex-col gap-1.5">
+        <label class="text-xs font-bold text-slate-400 uppercase tracking-wider pl-1">Hourly Rate (€)</label>
+        <input 
+          type="number" 
+          step="0.5"
+          [ngModel]="hourlyRate()" 
+          (ngModelChange)="hourlyRate.set($event)" 
+          name="empRate"
+          class="w-full bg-slate-950 border border-slate-700 focus:border-emerald-400 rounded-xl px-4 py-3 text-sm font-bold text-emerald-400 outline-none transition-all"
+          required
+        />
+      </div>
+    </div>
+
+    <!-- Role Selection -->
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-bold text-slate-400 uppercase tracking-wider pl-1">System Role</label>
+      <select 
+        [ngModel]="role()" 
+        (ngModelChange)="role.set($event)" 
+        name="empRole"
+        class="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-4 py-3 text-sm font-bold text-white outline-none transition-all appearance-none cursor-pointer">
+        @for (r of availableRoles; track r.value) {
+          <option [value]="r.value">{{ r.label }}</option>
+        }
+      </select>
+    </div>
+
+    <!-- Alerts -->
+    @if (errorMessage()) {
+      <div class="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-bold">
+        ⚠️ {{ errorMessage() }}
+      </div>
+    }
+    @if (successMessage()) {
+      <div class="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold">
+        ✅ {{ successMessage() }}
+      </div>
+    }
+
+    <!-- Submit Button -->
+    <div class="flex gap-3 mt-2">
+      <button 
+        type="button" 
+        (click)="cancel()"
+        class="w-1/3 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-sm transition-all cursor-pointer">
+        Cancel
+      </button>
+
+      <button 
+        type="submit" 
+        [disabled]="isSubmitting()"
+        class="w-2/3 py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-sm shadow-lg transition-all active:scale-95 cursor-pointer">
+        {{ isSubmitting() ? 'Saving...' : 'Create Employee' }}
+      </button>
+    </div>
+
+  </form>
+</div>
