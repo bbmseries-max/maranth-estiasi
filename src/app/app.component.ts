@@ -73,13 +73,49 @@ export class AppComponent implements OnInit {
     }
   }
 
-  public async endMyShift(): Promise<void> {
+ public async endMyShift(): Promise<void> {
     const current = this.authShiftService.currentEmployee();
     if (!current) return;
 
-    if (confirm(`Είστε σίγουρος ότι θέλετε να κλείσετε τη βάρδια σας και να αποσυνδεθείτε;`)) {
+    // 1. Confirm clock-out intent
+    const confirmed = confirm(`Είστε σίγουρος ότι θέλετε να κλείσετε τη βάρδια σας και να αποσυνδεθείτε;`);
+    if (!confirmed) return;
+
+    try {
+      // 2. Check if the staff member has an open cash vault drawer
+      const activeVaults = this.posService.activeVaultSessions();
+      const myOpenVault = activeVaults.find(
+        v => (v.waiterId === current.id || v.waiterId === current.pin || v.waiterName === current.name) && v.status === 'OPEN'
+      );
+
+      if (myOpenVault) {
+        const expectedCash = (myOpenVault.startingCash || 0) + (myOpenVault.cashCollected || 0);
+        const cashHandedStr = prompt(
+          `👛 Κλείσιμο Ταμείου (${current.name})\n` +
+          `Αναμενόμενα Μετρητά: €${expectedCash.toFixed(2)}\n\n` +
+          `Εισάγετε το ποσό μετρητών προς παράδοση:`,
+          expectedCash.toFixed(2)
+        );
+
+        if (cashHandedStr !== null) {
+          const cashHanded = parseFloat(cashHandedStr) || 0;
+          await this.posService.closeWaiterVaultSession({
+            ...myOpenVault,
+            cashHandedOver: cashHanded,
+            cashVariance: Number((cashHanded - expectedCash).toFixed(2))
+          });
+        }
+      }
+
+      // 3. Clock out the employee shift in Firestore & local state
       await this.authShiftService.clockOutEmployeeShift(current.id, `Έξοδος υπαλλήλου (${current.name})`);
+
+      // 4. Log out and return to the PIN login screen
       this.authShiftService.logoutEmployee();
+
+    } catch (error) {
+      console.error('Error during endMyShift:', error);
+      alert('Παρουσιάστηκε σφάλμα κατά το κλείσιμο της βάρδιας. Παρακαλώ δοκιμάστε ξανά.');
     }
   }
 }
