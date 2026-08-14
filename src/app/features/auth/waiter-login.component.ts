@@ -3,7 +3,7 @@
 import { Component, inject, signal, OnInit, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, ActivatedRoute, Params } from '@angular/router';
 
 import { TenantContextService, StoreProfile } from '../../core/services/tenant-context.service';
 import { AuthShiftService } from '../../core/services/auth-shift.service'; 
@@ -21,6 +21,7 @@ export class WaiterLoginComponent implements OnInit {
   public authShiftService = inject(AuthShiftService);
   public posService = inject(RestaurantPosService);
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
 
   public step = signal<'PIN_ENTRY' | 'SHIFT_SETUP'>('PIN_ENTRY');
   public enteredPin = signal<string>('');
@@ -28,7 +29,10 @@ export class WaiterLoginComponent implements OnInit {
   public startingFloat: number = 50;
   public supportsBiometrics = false;
 
-  // 🏢 Multi-Store Switcher: Use getter / computed for rock-solid template visibility
+  // 🏢 Multi-Store Switcher Signals
+  public showStoreSwitcher = signal<boolean>(false);
+  private logoTapCount = 0;
+
   public get availableStores(): StoreProfile[] {
     return this.tenantContext.registeredStores;
   }
@@ -40,11 +44,37 @@ export class WaiterLoginComponent implements OnInit {
     this.errorMessage.set('');
     this.supportsBiometrics = !!(window.PublicKeyCredential);
 
+    // 1. Check URL parameters for direct store isolation & admin switcher
+    this.route.queryParams.subscribe((params: Params) => {
+      const requestedTenant = params['tenant'];
+      if (requestedTenant) {
+        const target = this.availableStores.find(s => s.tenantId === requestedTenant);
+        if (target && (target.tenantId !== this.activeStore().tenantId || target.storeId !== this.activeStore().storeId)) {
+          this.tenantContext.switchStore(target);
+          return;
+        }
+      }
+
+      if (params['admin'] === 'true') {
+        this.showStoreSwitcher.set(true);
+      }
+    });
+
+    // 2. Redirect if already logged in with active shift
     const emp = this.posService.currentEmployee();
     if (emp && this.posService.getEmployeeActiveShift(emp.id)) {
       this.redirectByRole(emp.role);
     } else {
       this.step.set('PIN_ENTRY');
+    }
+  }
+
+  // 🔑 Secret Master Toggle: Tap the coffee logo 3 times to reveal the store switcher
+  public onLogoTap(): void {
+    this.logoTapCount++;
+    if (this.logoTapCount >= 3) {
+      this.showStoreSwitcher.update(v => !v);
+      this.logoTapCount = 0;
     }
   }
 

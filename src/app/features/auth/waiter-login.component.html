@@ -3,35 +3,32 @@
   <!-- MAIN AUTH CARD -->
   <div class="bg-slate-800 border border-slate-700 w-full max-w-md rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col items-center">
     
-    <!-- BRAND HEADER -->
-    <div class="flex flex-col items-center mb-6 text-center">
-      <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-400 flex items-center justify-center text-3xl shadow-lg mb-3">
-        ☕
-      </div>
-      <h1 class="text-2xl font-black tracking-tight text-white m-0">MARANTH ESTIASI</h1>
-      <p class="text-xs text-slate-400 font-medium uppercase tracking-widest mt-1">Σύστημα Εισόδου Προσωπικού</p>
-    </div>
+  <!-- BRAND HEADER (Click logo 3x to reveal admin store switcher) -->
+<div class="flex flex-col items-center mb-6 text-center cursor-pointer" (click)="onLogoTap()">
+  <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-400 flex items-center justify-center text-3xl shadow-lg mb-3">
+    {{ activeStore().icon }}
+  </div>
+  <h1 class="text-2xl font-black tracking-tight text-white m-0">{{ activeStore().name }}</h1>
+  <p class="text-xs text-slate-400 font-medium uppercase tracking-widest mt-1">Σύστημα Εισόδου Προσωπικού</p>
+</div>
 
-    <!-- 🏢 STORE SELECTOR PILLS -->
-    <div class="w-full mb-6 p-1.5 bg-slate-900 border border-slate-700 rounded-2xl flex items-center gap-2 shadow-inner">
-      @for (s of availableStores; track s.tenantId + s.storeId) {
-        <button 
-          type="button"
-          (click)="selectStore(s)"
-          class="flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all duration-200 cursor-pointer"
-          [ngClass]="activeStore().tenantId === s.tenantId && activeStore().storeId === s.storeId
-            ? 'bg-amber-500 text-slate-950 shadow-md scale-[1.02]' 
-            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'">
-          <span>{{ s.icon }}</span>
-          <span class="truncate">{{ s.name }}</span>
-          <span 
-            class="text-[9px] px-1.5 py-0.5 rounded font-black tracking-wider uppercase"
-            [ngClass]="activeStore().tenantId === s.tenantId && activeStore().storeId === s.storeId ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-800 text-slate-400'">
-            {{ s.badge }}
-          </span>
-        </button>
-      }
-    </div>
+<!-- 🏢 STORE SELECTOR (Visible only if URL has ?admin=true or after 3 taps on logo) -->
+@if (showStoreSwitcher()) {
+  <div class="w-full mb-6 p-1.5 bg-slate-900 border border-slate-700 rounded-2xl flex items-center gap-2 shadow-inner">
+    @for (s of availableStores; track s.tenantId + s.storeId) {
+      <button 
+        type="button"
+        (click)="selectStore(s)"
+        class="flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all duration-200 cursor-pointer"
+        [ngClass]="activeStore().tenantId === s.tenantId && activeStore().storeId === s.storeId
+          ? 'bg-amber-500 text-slate-950 shadow-md scale-[1.02]' 
+          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'">
+        <span>{{ s.icon }}</span>
+        <span class="truncate">{{ s.name }}</span>
+      </button>
+    }
+  </div>
+}
 
     @if (step() === 'PIN_ENTRY') {
       <!-- PIN DISPLAY DOTS -->
