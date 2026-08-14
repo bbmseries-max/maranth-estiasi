@@ -69,43 +69,54 @@ export class TableOrderService {
   private knownItemStatusMap = new Map<string, ItemPreparationStatus>();
   private isInitialTablesSync = true;
 
- public occupiedTables = computed(() => 
-    this.tables().filter(t => {
-      const hasActiveItems = Boolean(
-        t.activeOrder?.items && 
-        t.activeOrder.items.some(i => (i as any).status !== 'VOIDED')
-      );
-      const isMarkedOccupied = t.status === 'OCCUPIED' || t.status === 'BILL_PRINTED';
-      const hasTotal = Number(t.currentTotal || t.activeOrder?.grandTotal || 0) > 0;
+ public occupiedTables = computed(() => {
+    const list = this.tables();
+    console.log('[DEBUG OCCUPIED TABLES CHECK] Total tables in memory:', list.length, list);
+    return list.filter(t => {
+      const items = (t.activeOrder?.items || (t as any).items || []) as any[];
+      const hasActiveItems = items.some(i => i && i.status !== 'VOIDED');
+      const isMarked = t.status === 'OCCUPIED' || t.status === 'BILL_PRINTED';
+      const hasPositiveTotal = Number(t.currentTotal || t.activeOrder?.grandTotal || (t.activeOrder as any)?.total || 0) > 0;
 
-      return (isMarkedOccupied || hasActiveItems || hasTotal) && t.status !== 'FREE';
-    })
-  );
+      const occupied = (isMarked || hasActiveItems || hasPositiveTotal) && t.status !== 'FREE';
+      return occupied;
+    });
+  });
 
   // --- SAFE TOTAL LIVE FLOOR REVENUE COMPUTATION ---
-  public totalLiveFloorRevenue = computed(() => 
-    this.tables().reduce((acc, t) => {
-      // 1. Calculate from activeOrder items if available
-      const items = t.activeOrder?.items || [];
-      const calculatedItemsTotal = items
-        .filter(i => (i as any).status !== 'VOIDED')
-        .reduce((sum, i) => {
-          const itemPrice = Number(i.finalItemPrice || (i as any).unitPrice || (i as any).price || 0);
-          const qty = Number(i.quantity || 1);
-          return sum + (itemPrice * qty);
-        }, 0);
+ public totalLiveFloorRevenue = computed(() => {
+    const list = this.tables();
+    let sum = 0;
 
-      // 2. Fallbacks: direct grandTotal, currentTotal, or calculated sum
-      const orderTotal = calculatedItemsTotal > 0 
-        ? calculatedItemsTotal 
-        : Number(t.activeOrder?.grandTotal || t.currentTotal || 0);
+    for (const t of list) {
+      // Check 1: Embedded activeOrder items
+      const items = (t.activeOrder?.items || (t as any).items || []) as any[];
+      let tableSum = 0;
 
-      const hasItems = items.length > 0;
-      const isOccupied = t.status === 'OCCUPIED' || t.status === 'BILL_PRINTED' || hasItems || orderTotal > 0;
+      if (items.length > 0) {
+        for (const item of items) {
+          if (item && item.status !== 'VOIDED') {
+            const rawPrice = item.finalItemPrice ?? item.unitPrice ?? item.price ?? item.productPrice ?? 0;
+            const price = Number(rawPrice) || 0;
+            const qty = Number(item.quantity || item.qty || 1);
+            tableSum += price * qty;
+          }
+        }
+      }
 
-      return acc + (isOccupied && t.status !== 'FREE' ? orderTotal : 0);
-    }, 0)
-  );
+      // Check 2: Direct totals
+      if (tableSum === 0) {
+        tableSum = Number(t.activeOrder?.grandTotal || (t.activeOrder as any)?.total || t.currentTotal || 0);
+      }
+
+      if (t.status !== 'FREE' || tableSum > 0) {
+        sum += tableSum;
+      }
+    }
+
+    console.log('[DEBUG LIVE FLOOR REVENUE]: Calculated Sum =', sum);
+    return Number(sum.toFixed(2));
+  });
 
   /**
    * Dynamic Resolver for Tenant ID & Store ID (Priority: localStorage -> Service Signal -> Fallback)
