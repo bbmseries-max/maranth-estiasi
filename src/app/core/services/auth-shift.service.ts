@@ -244,41 +244,59 @@ export class AuthShiftService {
   }
 
   // --- AUTHENTICATION METHODS ---
+  public getStorePrefix(): string {
+    const store = this.activeStoreId() || 'store-1';
+    if (store.toLowerCase().includes('tirane') || store.toLowerCase().includes('kafe')) {
+      return 'TK';
+    }
+    return store.substring(0, 2).toUpperCase();
+  }
 
   public loginWithPin(pin: string): Employee | null {
-    const cleanPin = pin.trim();
-    let employee = this.employees().find(e => (e.pin === cleanPin || e.pinCode === cleanPin) && e.isActive !== false);
+    let cleanPin = String(pin).trim().toUpperCase();
+    const currentTenant = this.activeTenantId();
+    const currentStore = this.activeStoreId();
+    const prefix = this.getStorePrefix();
 
-    // 🟢 Universal Store Seeding for Default PINs (9999, 1111, 1234)
+    // Strip out prefix if typed manually (e.g., "TK-9999" or "TK9999" -> "9999")
+    if (cleanPin.startsWith(`${prefix}-`)) {
+      cleanPin = cleanPin.replace(`${prefix}-`, '');
+    } else if (cleanPin.startsWith(prefix)) {
+      cleanPin = cleanPin.substring(prefix.length);
+    }
+
+    // 1. Search employees strictly matching this store AND clean PIN
+    let employee = this.employees().find(e => {
+      const matchStore = !e.storeId || e.storeId === currentStore;
+      const matchPin = String(e.pin).trim() === cleanPin || String(e.pinCode).trim() === cleanPin;
+      return matchStore && matchPin && e.isActive !== false;
+    });
+
+    // 2. Exact fallback profiles with store prefix in display name
     if (!employee) {
-      const tenantId = this.activeTenantId();
-      const storeId = this.activeStoreId();
-
-      const defaultSeeds: Record<string, { name: string; role: Role; rate: number }> = {
-        '9999': { name: 'Διαχειριστής (9999)', role: 'MANAGER', rate: 10.0 },
-        '1111': { name: 'Υπεύθυνος Βάρδιας (1111)', role: 'MANAGER', rate: 8.5 },
-        '1234': { name: 'Σερβιτόρος / Barista (1234)', role: 'WAITER', rate: 6.5 }
+      const predefinedStaff: Record<string, { name: string; role: Role; rate: number }> = {
+        '9999': { name: `[${prefix}] Διαχειριστής`, role: 'MANAGER', rate: 10.0 },
+        '1111': { name: `[${prefix}] Υπεύθυνος Βάρδιας`, role: 'MANAGER', rate: 8.5 },
+        '1234': { name: `[${prefix}] Σερβιτόρος 1`, role: 'WAITER', rate: 6.5 },
+        '5555': { name: `[${prefix}] Σερβιτόρος 2`, role: 'WAITER', rate: 6.5 }
       };
 
-      if (defaultSeeds[cleanPin]) {
-        const seed = defaultSeeds[cleanPin];
+      if (predefinedStaff[cleanPin]) {
+        const seed = predefinedStaff[cleanPin];
         employee = {
-          id: `${storeId}_emp_${cleanPin}`,
+          id: `${currentStore}_emp_${cleanPin}`,
           name: seed.name,
           pin: cleanPin,
-          pinCode: cleanPin,
+          pinCode: `${prefix}-${cleanPin}`, // Combined PIN code: "TK-9999"
           role: seed.role,
           hourlyRate: seed.rate,
           isActive: true,
           active: true,
-          tenantId,
-          storeId
+          tenantId: currentTenant,
+          storeId: currentStore
         };
 
-        this.employees.update(list => [employee!, ...list.filter(e => e.pin !== cleanPin)]);
-        if (this.db) {
-          setDoc(doc(this.db, 'employees', employee.id), cleanUndefined(employee)).catch(() => {});
-        }
+        this.employees.update(list => [employee!, ...list.filter(e => String(e.pin).trim() !== cleanPin)]);
       }
     }
 
