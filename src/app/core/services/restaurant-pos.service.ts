@@ -14,7 +14,7 @@ import {
   onSnapshot,
   query,
   where,
-  Unsubscribe
+  Unsubscribe 
 } from 'firebase/firestore';
 
 import { InventoryService } from './inventory.service';
@@ -35,7 +35,7 @@ import {
   SaleRecord,
   UnitOfMeasure,
   GreekVatRate,
-  ItemPreparationStatus
+  ItemPreparationStatus 
 } from '../modals';
 
 const DEFAULT_FIREBASE_CONFIG = {
@@ -95,18 +95,49 @@ export class RestaurantPosService {
   public activeOrders = this.tableOrderService.activeOrders;
   public unreadReadyNotifications = this.tableOrderService.unreadReadyNotifications;
   public occupiedTables = this.tableOrderService.occupiedTables;
+
+  // --- OCCUPIED TABLES COUNT ---
+ public occupiedTablesCount = computed(() => {
+  const currentTenant = this.tenantContext.currentTenantId();
+  return this.tables().filter(t => {
+    const matchTenant = !t.tenantId || t.tenantId === currentTenant;
+    const isOccupied = t.status !== 'FREE' && t.status !== 'AVAILABLE';
+    return matchTenant && isOccupied;
+  }).length;
+});
+
+  // --- LIVE FLOOR REVENUE CALCULATION ---
   public totalLiveFloorRevenue = computed(() => {
-    const activeTables = this.tables().filter(t => t.status !== 'FREE' && t.activeOrder);
+    const currentTenant = this.tenantContext.currentTenantId();
+    const activeTables = this.tables().filter(t => 
+      (!t.tenantId || t.tenantId === currentTenant) && 
+      t.status !== 'FREE' && 
+      t.status !== 'AVAILABLE'
+    );
     
-    return activeTables.reduce((sum, t) => {
-      const items = t.activeOrder?.items || [];
-      const tableTotal = items
-        .filter(item => item.status !== 'VOIDED')
-        .reduce((itemSum, item) => itemSum + ((item.unitPrice || 0) * (item.quantity || 1)), 0);
-      
-      return Number((sum + tableTotal).toFixed(2));
-    }, 0);
+    let total = 0;
+    for (const table of activeTables) {
+      const orderObj = (table as any).activeOrder || (table as any).currentOrder || (table as any).order;
+      const itemsList = orderObj?.items || (table as any).items || [];
+
+      if (Array.isArray(itemsList) && itemsList.length > 0) {
+        for (const item of itemsList) {
+          if (item.status !== 'VOIDED' && item.status !== 'CANCELLED') {
+            const price = Number(item.unitPrice || item.finalItemPrice || item.price || 0);
+            const qty = Number(item.quantity || 1);
+            total += price * qty;
+          }
+        }
+      } else if (orderObj && typeof orderObj.total === 'number') {
+        total += orderObj.total;
+      }
+    }
+
+    return Number(total.toFixed(2));
   });
+
+  // Alias for template bindings
+  public liveFloorRevenue = computed(() => this.totalLiveFloorRevenue());
 
   // --- FINANCIAL & REPORTING SIGNALS ---
   public allVaultSessions = signal<WaiterVaultSession[]>([]);
@@ -134,6 +165,12 @@ export class RestaurantPosService {
     return settledSalesTotal + this.totalLiveFloorRevenue();
   });
 
+  // Template Aliases
+  public totalCashInVaults = computed(() => this.totalDailyCashInVaults());
+  public totalCardInVaults = computed(() => this.totalDailyCardInVaults());
+  public totalStartingFloats = computed(() => this.totalDailyStartingFloats());
+  public totalGrossSales = computed(() => this.totalDailyGrossSales());
+
   public vatBreakdown = computed(() => {
     let gross13 = 0; let net13 = 0; let vat13 = 0;
     let gross24 = 0; let net24 = 0; let vat24 = 0;
@@ -154,7 +191,7 @@ export class RestaurantPosService {
       for (const item of sale.items) {
         if (item.status === 'VOIDED') continue;
 
-        const itemGross = (item.finalItemPrice || item.unitPrice || 0) * (item.quantity || 1);
+        const itemGross = (item.finalItemPrice || item.unitPrice || item.unitPrice || 0) * (item.quantity || 1);
         const rate = Number(item.taxRate) || 13;
 
         if (rate === 24) {
@@ -195,6 +232,9 @@ export class RestaurantPosService {
       totalVat: Number(totalVat.toFixed(2))
     };
   });
+
+  // Alias for VAT
+  public vatData = computed(() => this.vatBreakdown());
 
   constructor() {
     try {
@@ -253,14 +293,12 @@ export class RestaurantPosService {
   }
 
   // --- AUTH & STAFF DELEGATES ---
-public loginWithPin(pin: string): Employee | null {
-    const employee = this.employees().find(e => e.pin === pin && e.isActive);
-
-    if (employee) {
-      this.setLoggedInEmployee(employee);
-      return employee;
+  public loginWithPin(pin: string): Employee | null {
+    const emp = this.authShiftService.loginWithPin(pin);
+    if (emp) {
+      this.setLoggedInEmployee(emp);
     }
-    return null;
+    return emp;
   }
 
   public setLoggedInEmployee(emp: Employee): void {
@@ -277,37 +315,6 @@ public loginWithPin(pin: string): Employee | null {
       this.openWaiterVault(50);
     } else {
       this.activeVaultSession.set(existingVault);
-    }
-  }
-
-  private autoStartZeroCashVault(emp: Employee): void {
-    const { tenantId, storeId } = this.getActiveTenantAndStore();
-    const existingVault = this.activeVaultSessions().find(v => v.waiterId === emp.id && v.status === 'OPEN');
-    if (existingVault) return;
-
-    const zeroVault: WaiterVaultSession = {
-      id: `VAULT-${Date.now()}`,
-      tenantId: emp.tenantId || tenantId,
-      storeId: emp.storeId || storeId,
-      shiftLogId: `SHIFT-${Date.now()}`,
-      waiterId: emp.id,
-      waiterName: emp.name,
-      startingFloat: 0,
-      startingCash: 0,
-      cashCollected: 0,
-      cardCollected: 0,
-      status: 'OPEN',
-      openedAt: new Date().toISOString()
-    };
-
-    this.allVaultSessions.update(list => [...list, zeroVault]);
-    this.activeVaultSessions.update(list => [...list, zeroVault]);
-    this.activeVaultSession.set(zeroVault);
-
-    if (this.db) {
-      setDoc(doc(this.db, 'vaults', zeroVault.id), cleanUndefined(zeroVault), { merge: true }).catch(err => {
-        console.error('Error auto-creating zero cash vault in Firestore:', err);
-      });
     }
   }
 
@@ -382,9 +389,15 @@ public loginWithPin(pin: string): Employee | null {
       { id: `${storeId}_prod_12`, name: 'Νερό 500ml', price: 0.50, categoryId: 'DRINKS', taxRate: 13, isActive: true, tenantId, storeId }
     ];
 
+    if ((this.inventoryService as any).categories) {
+      (this.inventoryService as any).categories.set(starterCategories);
+    }
     this.products.update(list => [...list.filter(p => p.storeId !== storeId), ...starterProducts]);
 
     if (this.db) {
+      for (const cat of starterCategories) {
+        await setDoc(doc(this.db, 'categories', cat.id), cleanUndefined(cat), { merge: true }).catch(() => {});
+      }
       for (const prod of starterProducts) {
         await setDoc(doc(this.db, 'products', prod.id), cleanUndefined(prod), { merge: true }).catch(() => {});
       }
@@ -560,7 +573,7 @@ public loginWithPin(pin: string): Employee | null {
           || activeVaults.find(v => v.waiterName === currentEmp?.name && v.status === 'OPEN')
           || activeVaults[0];
 
-      // 2. 🛡️ Auto-create fallback vault if none was open and assign it properly
+      // 2. Auto-create fallback vault if none was open and assign it properly
       if (!targetVault && currentEmp) {
         this.openWaiterVault(50);
         targetVault = this.activeVaultSession();
@@ -628,7 +641,7 @@ public loginWithPin(pin: string): Employee | null {
 
       const emp = this.currentEmployee();
       if (emp) {
-        const myActiveVault = activeOnly.find(v => v.waiterId === emp.id);
+        const myActiveVault = activeOnly.find(v => v.waiterId === emp.id || v.waiterName === emp.name);
         this.activeVaultSession.set(myActiveVault || null);
       } else {
         this.activeVaultSession.set(null);
@@ -680,7 +693,9 @@ public loginWithPin(pin: string): Employee | null {
     const { tenantId, storeId } = this.getActiveTenantAndStore();
     const cleanFloat = startingFloat >= 0 ? startingFloat : 50;
 
-    const existingOpenVault = this.activeVaultSessions().find(v => v.waiterId === emp.id && v.status === 'OPEN');
+    const existingOpenVault = this.activeVaultSessions().find(
+      v => (v.waiterId === emp.id || v.waiterName === emp.name) && v.status === 'OPEN'
+    );
     
     if (existingOpenVault) {
       if (existingOpenVault.startingFloat !== cleanFloat) {
@@ -762,7 +777,7 @@ public loginWithPin(pin: string): Employee | null {
     this.closeWaiterVaultSession(closedVault);
   }
 
-public async closeWaiterVaultSession(closedSession: WaiterVaultSession): Promise<void> {
+  public async closeWaiterVaultSession(closedSession: WaiterVaultSession): Promise<void> {
     const nowStr = new Date().toISOString();
 
     // 1. Mark Vault as CLOSED locally
