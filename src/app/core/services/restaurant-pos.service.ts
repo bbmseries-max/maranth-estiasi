@@ -344,6 +344,35 @@ public loginWithPin(pin: string): Employee | null {
   }
 
   // --- CATEGORIES & PRODUCTS DELEGATES ---
+
+  public async seedDefaultMenuForCurrentStore(): Promise<void> {
+    const tenantId = this.tenantContext.currentTenantId();
+    const storeId = this.tenantContext.currentStoreId();
+
+    const starterProducts: Product[] = [
+      { id: `${storeId}_prod_1`, name: 'Espresso', price: 1.80, categoryId: 'COFFEE', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_2`, name: 'Espresso Double', price: 2.20, categoryId: 'COFFEE', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_3`, name: 'Freddo Espresso', price: 2.30, categoryId: 'COFFEE', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_4`, name: 'Cappuccino', price: 2.50, categoryId: 'COFFEE', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_5`, name: 'Freddo Cappuccino', price: 2.70, categoryId: 'COFFEE', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_6`, name: 'Ελληνικός Διπλός', price: 2.00, categoryId: 'COFFEE', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_7`, name: 'Φυσικός Χυμός Πορτοκάλι', price: 3.50, categoryId: 'DRINKS', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_8`, name: 'Τοστ Γαλοπούλα - Κασέρι', price: 2.80, categoryId: 'FOOD', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_9`, name: 'Club Sandwich Classic', price: 6.50, categoryId: 'FOOD', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_10`, name: 'Μπύρα Alfa 330ml', price: 3.50, categoryId: 'BAR', taxRate: 24, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_11`, name: 'Aperol Spritz', price: 7.00, categoryId: 'BAR', taxRate: 24, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_12`, name: 'Νερό 500ml', price: 0.50, categoryId: 'DRINKS', taxRate: 13, isActive: true, tenantId, storeId }
+    ];
+
+    this.products.update(list => [...list.filter(p => p.storeId !== storeId), ...starterProducts]);
+
+    if (this.db) {
+      for (const prod of starterProducts) {
+        await setDoc(doc(this.db, 'products', prod.id), cleanUndefined(prod), { merge: true }).catch(() => {});
+      }
+    }
+  }
+  
   public addCategory(name: string, icon: string = '📁') {
     return this.inventoryService.addCategory(name, icon);
   }

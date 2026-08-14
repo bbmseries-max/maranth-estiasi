@@ -249,26 +249,36 @@ export class AuthShiftService {
     const cleanPin = pin.trim();
     let employee = this.employees().find(e => (e.pin === cleanPin || e.pinCode === cleanPin) && e.isActive !== false);
 
-    // 🟢 Fallback for Master Manager 9999 if not yet written to Firestore
-    if (!employee && cleanPin === '9999') {
+    // 🟢 Universal Store Seeding for Default PINs (9999, 1111, 1234)
+    if (!employee) {
       const tenantId = this.activeTenantId();
       const storeId = this.activeStoreId();
-      employee = {
-        id: `${storeId}_emp_9999`,
-        name: 'Διαχειριστής (9999)',
-        pin: '9999',
-        pinCode: '9999',
-        role: 'MANAGER',
-        hourlyRate: 10.0,
-        isActive: true,
-        active: true,
-        tenantId,
-        storeId
+
+      const defaultSeeds: Record<string, { name: string; role: Role; rate: number }> = {
+        '9999': { name: 'Διαχειριστής (9999)', role: 'MANAGER', rate: 10.0 },
+        '1111': { name: 'Υπεύθυνος Βάρδιας (1111)', role: 'MANAGER', rate: 8.5 },
+        '1234': { name: 'Σερβιτόρος / Barista (1234)', role: 'WAITER', rate: 6.5 }
       };
 
-      this.employees.update(list => [employee!, ...list.filter(e => e.pin !== '9999')]);
-      if (this.db) {
-        setDoc(doc(this.db, 'employees', employee.id), cleanUndefined(employee)).catch(() => {});
+      if (defaultSeeds[cleanPin]) {
+        const seed = defaultSeeds[cleanPin];
+        employee = {
+          id: `${storeId}_emp_${cleanPin}`,
+          name: seed.name,
+          pin: cleanPin,
+          pinCode: cleanPin,
+          role: seed.role,
+          hourlyRate: seed.rate,
+          isActive: true,
+          active: true,
+          tenantId,
+          storeId
+        };
+
+        this.employees.update(list => [employee!, ...list.filter(e => e.pin !== cleanPin)]);
+        if (this.db) {
+          setDoc(doc(this.db, 'employees', employee.id), cleanUndefined(employee)).catch(() => {});
+        }
       }
     }
 
@@ -278,6 +288,38 @@ export class AuthShiftService {
     }
 
     return null;
+  }
+
+  /**
+   * 🧹 Emergency / Maintenance: Flushes all lingering open shifts in Firestore
+   */
+  public async closeAllActiveShifts(): Promise<void> {
+    const nowStr = new Date().toISOString();
+    const openShifts = this.workShifts().filter(s => s.status === 'WORKING');
+
+    // 1. Update in-memory signals
+    this.workShifts.update(list => list.map(s => ({
+      ...s,
+      status: 'COMPLETED' as const,
+      clockOutTime: s.clockOutTime || nowStr,
+      notes: s.notes || 'Μαζικό κλείσιμο βάρδιας (Admin flush)'
+    })));
+    this.activeWorkShift.set(null);
+
+    // 2. Persist to Firestore
+    if (this.db) {
+      for (const shift of openShifts) {
+        try {
+          await setDoc(doc(this.db, 'shifts', shift.id), cleanUndefined({
+            ...shift,
+            status: 'COMPLETED',
+            clockOutTime: nowStr
+          }), { merge: true });
+        } catch (err) {
+          console.error('Error flushing shift:', err);
+        }
+      }
+    }
   }
 
   public setLoggedInEmployee(emp: Employee): void {

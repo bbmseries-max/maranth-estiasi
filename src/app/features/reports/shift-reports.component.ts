@@ -1,6 +1,7 @@
 import { Component, inject, signal, computed, OnInit, OnDestroy, ChangeDetectionStrategy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule, DatePipe, CurrencyPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { AuthShiftService } from '../../core/services/auth-shift.service';
 import { RouterLink } from '@angular/router';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
 import { DailyZReportSnapshot } from '../../core/modals/restaurant-pos.modals';
@@ -58,6 +59,22 @@ import {
 
       <!-- MAIN CONTAINER -->
       <div class="flex-1 p-4 md:p-6 overflow-y-auto max-w-7xl mx-auto w-full">
+
+      <div class="flex flex-wrap gap-3 my-4">
+  <!-- 1. Flush Orphan Shifts Button -->
+  <button 
+    (click)="flushAllShifts()"
+    class="px-4 py-2 bg-red-700 hover:bg-red-600 text-white text-xs font-bold rounded-lg shadow flex items-center gap-2">
+    <span>🧹</span> Κλείσιμο Όλων των Παλιών Βαρδιών
+  </button>
+
+  <!-- 2. Seed Starter Menu Button -->
+  <button 
+    (click)="seedMenu()"
+    class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg shadow flex items-center gap-2">
+    <span>☕</span> Φόρτωση Καταλόγου Προϊόντων
+  </button>
+</div>
         
         <!-- ========================================== -->
         <!-- TAB 1: Z-REPORT & LIVE REVENUE METRICS     -->
@@ -478,6 +495,7 @@ import {
   `
 })
 export class ShiftReportsComponent implements OnInit, OnDestroy {
+  public authShiftService = inject(AuthShiftService);
   public posService = inject(RestaurantPosService);
   private printerService = inject(ThermalPrinterService);
   private cdr = inject(ChangeDetectorRef);
@@ -630,6 +648,26 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
       case 'VAULT_CLOSED':
       case 'Z_REPORT_CLOSED': return 'bg-red-500/20 text-red-400 border-red-500/40';
       default: return 'bg-slate-800 text-slate-300 border-slate-700';
+    }
+  }
+
+public async flushAllShifts(): Promise<void> {
+    try {
+      if (confirm('Θέλετε να κλείσουν όλες οι εκκρεμείς/παλιές βάρδιες;')) {
+        await this.authShiftService.closeAllActiveShifts();
+        alert('Όλες οι παλιές βάρδιες έκλεισαν επιτυχώς!');
+      }
+    } catch (err) {
+      console.error('Failed to flush shifts:', err);
+    }
+  }
+
+  public async seedMenu(): Promise<void> {
+    try {
+      await this.posService.seedDefaultMenuForCurrentStore();
+      alert('Ο κατάλογος προϊόντων φορτώθηκε επιτυχώς!');
+    } catch (err) {
+      console.error('Failed to seed menu:', err);
     }
   }
 }
