@@ -2,79 +2,80 @@
 
 import { Injectable, signal, computed } from '@angular/core';
 
-export interface StoreTenant {
+export interface StoreProfile {
   tenantId: string;
   storeId: string;
-  storeName: string;
-  currency?: string;
-  vatTiers?: { food: number; alcohol: number };
+  name: string;
+  badge: string;
+  city: string;
+  icon: string;
+  themeColor: string;
+  isDemo?: boolean;
 }
 
 @Injectable({
   providedIn: 'root'
 })
 export class TenantContextService {
-  public availableStores: StoreTenant[] = [
-    {
-      tenantId: 'coffee-shop-demo',
-      storeId: 'store-1',
-      storeName: '☕ Coffee Shop Demo',
-      currency: '€',
-      vatTiers: { food: 13, alcohol: 24 }
-    },
+  // 🏢 Scalable Store Registry: Add new client shops here anytime!
+  public readonly registeredStores: StoreProfile[] = [
     {
       tenantId: 'tirane-kafe-1974',
       storeId: 'store-2',
-      storeName: '📍 Tirane kafe 1974',
-      currency: '€',
-      vatTiers: { food: 13, alcohol: 24 }
+      name: 'Tiranë Kafe 1974',
+      badge: 'TK',
+      city: 'Tiranë',
+      icon: '☕',
+      themeColor: 'amber'
+    },
+    {
+      tenantId: 'coffee-shop-demo',
+      storeId: 'store-1',
+      name: 'Demo Estiasi (Showcase)',
+      badge: 'DEMO',
+      city: 'Live Demo',
+      icon: '✨',
+      themeColor: 'sky',
+      isDemo: true
     }
+    // ➕ Future shops (Client 3, Client 4, etc.) can be added right here!
   ];
 
+  // Reactive State Signals
   public currentTenantId = signal<string>(
     localStorage.getItem('active_tenant_id') || 'tirane-kafe-1974'
   );
-  
+
   public currentStoreId = signal<string>(
     localStorage.getItem('active_store_id') || 'store-2'
   );
 
-  // Backward-compatibility aliases
-  public activeTenantId = computed(() => this.currentTenantId());
-  public activeStoreId = computed(() => this.currentStoreId());
-  public tenantId = computed(() => this.currentTenantId());
-  public storeId = computed(() => this.currentStoreId());
+  // Active Store Profile Computed Signal
+  public activeStore = computed<StoreProfile>(() => {
+    const tenant = this.currentTenantId();
+    const store = this.currentStoreId();
+    return (
+      this.registeredStores.find(s => s.tenantId === tenant && s.storeId === store) ||
+      this.registeredStores[0]
+    );
+  });
 
   /**
-   * Primary switcher method
+   * Fast 1-Click Store Switcher
+   * Flushes old local sessions and cleanly switches active store
    */
-  public setTenantAndStore(tenantId: string, storeId?: string): void {
-    const targetStoreId = storeId || (tenantId === 'tirane-kafe-1974' ? 'store-2' : 'store-1');
-    
-    this.currentTenantId.set(tenantId);
-    this.currentStoreId.set(targetStoreId);
-    
-    localStorage.setItem('active_tenant_id', tenantId);
-    localStorage.setItem('active_store_id', targetStoreId);
+  public switchStore(target: StoreProfile): void {
+    this.currentTenantId.set(target.tenantId);
+    this.currentStoreId.set(target.storeId);
 
-    // Clear previous employee session when switching stores
+    localStorage.setItem('active_tenant_id', target.tenantId);
+    localStorage.setItem('active_store_id', target.storeId);
+
+    // Clean session caches to prevent cross-tenant contamination
     localStorage.removeItem('current_employee');
     localStorage.removeItem('maranth_pos_employee');
 
-    if (typeof window !== 'undefined') {
-      window.location.reload();
-    }
-  }
-
-  public selectStore(store: StoreTenant): void {
-    this.setTenantAndStore(store.tenantId, store.storeId);
-  }
-
-  public setTenant(tenantId: string): void {
-    this.setTenantAndStore(tenantId);
-  }
-
-  public setStore(storeId: string): void {
-    this.setTenantAndStore(this.currentTenantId(), storeId);
+    // Reload cleanly to reconnect all Firestore listeners to the new store
+    window.location.href = '/login';
   }
 }
