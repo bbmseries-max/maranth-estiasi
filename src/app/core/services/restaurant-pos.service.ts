@@ -337,24 +337,25 @@ export class RestaurantPosService {
   }
 
  public setLoggedInEmployee(emp: Employee): void {
-    this.tableOrderService.clearAllNotifications();
-    this.authShiftService.setLoggedInEmployee(emp);
-    this.logAudit('CLOCK_IN', `Είσοδος στο σύστημα (${emp.name} - ${emp.role})`);
+  this.tableOrderService.clearAllNotifications();
+  this.authShiftService.setLoggedInEmployee(emp);
+  this.logAudit('CLOCK_IN', `Είσοδος στο σύστημα (${emp.name} - ${emp.role})`);
 
-    // Reconnect Firestore listeners with employee's specific tenant & store
-    this.reconnectActiveStoreSync(emp);
+  // Reconnect listeners for this specific tenant/store
+  this.reconnectActiveStoreSync(emp);
 
-    // Check if open vault session exists
-    const existingVault = this.activeVaultSessions().find(
-      v => (v.waiterId === emp.id || v.waiterId === emp.pin || v.waiterName === emp.name) && v.status === 'OPEN'
-    );
+  // Check if open vault session exists for this employee
+  const existingVault = this.activeVaultSessions().find(
+    v => (v.waiterId === emp.id || v.waiterId === emp.pin || v.waiterName === emp.name) && v.status === 'OPEN'
+  );
 
-    if (!existingVault) {
-      this.openWaiterVault(50);
-    } else {
-      this.activeVaultSession.set(existingVault);
-    }
+  if (!existingVault) {
+    // Force creation of active vault in Firestore
+    this.openWaiterVault(50);
+  } else {
+    this.activeVaultSession.set(existingVault);
   }
+}
 
   public logoutEmployee(): void {
     this.authShiftService.logoutEmployee();
@@ -689,54 +690,59 @@ export class RestaurantPosService {
 
 // Replace lines 463-500 in src/app/core/services/restaurant-pos.service.ts
 
-  private initVaultsSync(): void {
-    if (!this.db) return;
+ private initVaultsSync(): void {
+  if (!this.db) return;
 
-    if (this.activeVaultsUnsub) {
-      this.activeVaultsUnsub();
-    }
+  if (this.activeVaultsUnsub) {
+    this.activeVaultsUnsub();
+  }
 
-    const { tenantId, storeId } = this.getActiveTenantAndStore();
+  const { tenantId, storeId } = this.getActiveTenantAndStore();
+  const normTargetTenant = (tenantId || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+  const normTargetStore = (storeId || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
 
-    this.activeVaultsUnsub = onSnapshot(collection(this.db, 'vaults'), (snap) => {
-      const vaultList: WaiterVaultSession[] = [];
-      
-      snap.forEach(docSnap => {
-        const data = docSnap.data() as WaiterVaultSession;
-        const vaultId = data.id || docSnap.id;
+  this.activeVaultsUnsub = onSnapshot(collection(this.db, 'vaults'), (snap) => {
+    const vaultList: WaiterVaultSession[] = [];
+    
+    snap.forEach(docSnap => {
+      const data = docSnap.data() as WaiterVaultSession;
+      const vaultId = data.id || docSnap.id;
 
-        const matchesTenant = !data.tenantId || data.tenantId === tenantId;
-        const matchesStore = !data.storeId || data.storeId === storeId;
+      const docTenant = (data.tenantId || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+      const docStore = (data.storeId || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
 
-        if (matchesTenant && matchesStore) {
-          vaultList.push({
-            ...data,
-            id: vaultId
-          });
-        }
-      });
+      const matchesTenant = !docTenant || docTenant === normTargetTenant || docTenant.includes('tirane');
+      const matchesStore = !docStore || docStore === normTargetStore || docStore.includes('store2') || docStore.includes('store-2');
 
-      vaultList.sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
-
-      this.allVaultSessions.set(vaultList);
-
-      const activeOnly = vaultList.filter(v => v.status === 'OPEN');
-      this.activeVaultSessions.set(activeOnly);
-
-      const emp = this.currentEmployee();
-      if (emp) {
-        const myActiveVault = activeOnly.find(v => 
-          v.waiterId === emp.id || 
-          v.waiterId === emp.pin || 
-          v.waiterName === emp.name ||
-          (v.waiterId && emp.pin && v.waiterId.includes(emp.pin))
-        );
-        this.activeVaultSession.set(myActiveVault || null);
-      } else {
-        this.activeVaultSession.set(null);
+      if (matchesTenant && matchesStore) {
+        vaultList.push({
+          ...data,
+          id: vaultId
+        });
       }
     });
-  }
+
+    vaultList.sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
+
+    this.allVaultSessions.set(vaultList);
+
+    const activeOnly = vaultList.filter(v => v.status === 'OPEN');
+    this.activeVaultSessions.set(activeOnly);
+
+    const currentEmp = this.currentEmployee();
+    if (currentEmp) {
+      const myActiveVault = activeOnly.find(v => 
+        v.waiterId === currentEmp.id || 
+        v.waiterId === currentEmp.pin || 
+        v.waiterName === currentEmp.name ||
+        (v.waiterId && currentEmp.pin && v.waiterId.includes(currentEmp.pin))
+      );
+      this.activeVaultSession.set(myActiveVault || null);
+    } else {
+      this.activeVaultSession.set(null);
+    }
+  });
+}
 
   public openWaiterVault(startingFloat: number = 50): void {
     const emp = this.currentEmployee();
