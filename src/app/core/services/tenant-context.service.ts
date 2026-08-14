@@ -38,7 +38,6 @@ export class TenantContextService {
       themeColor: 'sky',
       isDemo: true
     }
-    // ➕ Future shops (Client 3, Client 4, etc.) can be added right here!
   ];
 
   // Reactive State Signals
@@ -61,15 +60,14 @@ export class TenantContextService {
   });
 
   /**
-   * Fast 1-Click Store Switcher
-   * Flushes old local sessions and cleanly switches active store
+   * Direct setter for Tenant & Store IDs (used by tenant-switcher component)
    */
-  public switchStore(target: StoreProfile): void {
-    this.currentTenantId.set(target.tenantId);
-    this.currentStoreId.set(target.storeId);
+  public setTenantAndStore(tenantId: string, storeId: string = 'store-1'): void {
+    this.currentTenantId.set(tenantId);
+    this.currentStoreId.set(storeId);
 
-    localStorage.setItem('active_tenant_id', target.tenantId);
-    localStorage.setItem('active_store_id', target.storeId);
+    localStorage.setItem('active_tenant_id', tenantId);
+    localStorage.setItem('active_store_id', storeId);
 
     // Clean session caches to prevent cross-tenant contamination
     localStorage.removeItem('current_employee');
@@ -77,5 +75,12 @@ export class TenantContextService {
 
     // Reload cleanly to reconnect all Firestore listeners to the new store
     window.location.href = '/login';
+  }
+
+  /**
+   * Fast 1-Click Store Switcher
+   */
+  public switchStore(target: StoreProfile): void {
+    this.setTenantAndStore(target.tenantId, target.storeId);
   }
 }
