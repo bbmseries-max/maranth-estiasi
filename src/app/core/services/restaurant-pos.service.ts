@@ -287,11 +287,11 @@ export class RestaurantPosService {
     }
   }
 
-  public reconnectActiveStoreSync(emp: Employee): void {
+ public reconnectActiveStoreSync(emp?: Employee): void {
     if (!this.db) return;
     this.inventoryService.initFirestoreSync(this.db);
     this.authShiftService.initFirestoreSync(this.db);
-    this.tableOrderService.initFirestoreSync(this.db, () => emp);
+    this.tableOrderService.initFirestoreSync(this.db, () => emp || this.currentEmployee());
     this.initVaultsSync();
     this.initFinancialListeners();
   }
@@ -336,14 +336,17 @@ export class RestaurantPosService {
     return emp;
   }
 
-  public setLoggedInEmployee(emp: Employee): void {
+ public setLoggedInEmployee(emp: Employee): void {
     this.tableOrderService.clearAllNotifications();
     this.authShiftService.setLoggedInEmployee(emp);
     this.logAudit('CLOCK_IN', `Είσοδος στο σύστημα (${emp.name} - ${emp.role})`);
 
-    // Ensure open vault session exists
+    // Reconnect Firestore listeners with employee's specific tenant & store
+    this.reconnectActiveStoreSync(emp);
+
+    // Check if open vault session exists
     const existingVault = this.activeVaultSessions().find(
-      v => (v.waiterId === emp.id || v.waiterName === emp.name) && v.status === 'OPEN'
+      v => (v.waiterId === emp.id || v.waiterId === emp.pin || v.waiterName === emp.name) && v.status === 'OPEN'
     );
 
     if (!existingVault) {
@@ -460,6 +463,46 @@ export class RestaurantPosService {
   }
 
   // --- INVENTORY & RAW MATERIAL DELEGATES ---
+
+  // Inside src/app/core/services/restaurant-pos.service.ts
+
+  public initFinancialListeners(): void {
+    if (!this.db) return;
+
+    if (this.salesUnsub) this.salesUnsub();
+    if (this.zReportsUnsub) this.zReportsUnsub();
+
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+
+    // 1. Sync Sales History real-time
+    const salesQuery = query(
+      collection(this.db, 'sales'),
+      where('tenantId', '==', tenantId),
+      where('storeId', '==', storeId)
+    );
+
+    this.salesUnsub = onSnapshot(salesQuery, (snap) => {
+      const list: SaleRecord[] = [];
+      snap.forEach(d => list.push(d.data() as SaleRecord));
+      list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      this.salesHistory.set(list);
+    });
+
+    // 2. Sync Z-Reports real-time
+    const zQuery = query(
+      collection(this.db, 'z_reports'),
+      where('tenantId', '==', tenantId),
+      where('storeId', '==', storeId)
+    );
+
+    this.zReportsUnsub = onSnapshot(zQuery, (snap) => {
+      const list: DailyZReportSnapshot[] = [];
+      snap.forEach(d => list.push(d.data() as DailyZReportSnapshot));
+      list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      this.zReports.set(list);
+    });
+  }
+
   public addRawMaterial(data: { name: string; unit: UnitOfMeasure; currentStock: number; minAlertStock: number; costPerUnit: number }) {
     return this.inventoryService.addRawMaterial(data);
   }
@@ -644,6 +687,8 @@ export class RestaurantPosService {
 
   // --- VAULT MANAGEMENT DELEGATES ---
 
+// Replace lines 463-500 in src/app/core/services/restaurant-pos.service.ts
+
   private initVaultsSync(): void {
     if (!this.db) return;
 
@@ -653,19 +698,25 @@ export class RestaurantPosService {
 
     const { tenantId, storeId } = this.getActiveTenantAndStore();
 
-    const vaultQuery = query(
-      collection(this.db, 'vaults'),
-      where('tenantId', '==', tenantId),
-      where('storeId', '==', storeId)
-    );
-
-    this.activeVaultsUnsub = onSnapshot(vaultQuery, (snap) => {
+    // Listen to the 'vaults' collection with relaxed matching (like AuthShiftService)
+    this.activeVaultsUnsub = onSnapshot(collection(this.db, 'vaults'), (snap) => {
       const vaultList: WaiterVaultSession[] = [];
-      if (!snap.empty) {
-        snap.forEach(docSnap => {
-          vaultList.push(docSnap.data() as WaiterVaultSession);
-        });
-      }
+      
+      snap.forEach(docSnap => {
+        const data = docSnap.data() as WaiterVaultSession;
+        const vaultId = data.id || docSnap.id;
+
+        // Match if belongs to active tenant OR is global/legacy
+        const matchesTenant = !data.tenantId || data.tenantId === tenantId;
+        const matchesStore = !data.storeId || data.storeId === storeId;
+
+        if (matchesTenant && matchesStore) {
+          vaultList.push({
+            ...data,
+            id: vaultId
+          });
+        }
+      });
 
       vaultList.sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
 
@@ -676,48 +727,13 @@ export class RestaurantPosService {
 
       const emp = this.currentEmployee();
       if (emp) {
-        const myActiveVault = activeOnly.find(v => v.waiterId === emp.id || v.waiterName === emp.name);
+        const myActiveVault = activeOnly.find(
+          v => v.waiterId === emp.id || v.waiterId === emp.pin || v.waiterName === emp.name
+        );
         this.activeVaultSession.set(myActiveVault || null);
       } else {
         this.activeVaultSession.set(null);
       }
-    });
-  }
-
-  private initFinancialListeners(): void {
-    if (!this.db) return;
-
-    if (this.salesUnsub) this.salesUnsub();
-    if (this.zReportsUnsub) this.zReportsUnsub();
-
-    const { tenantId, storeId } = this.getActiveTenantAndStore();
-
-    // 1. Sync Sales History real-time
-    const salesQuery = query(
-      collection(this.db, 'sales'),
-      where('tenantId', '==', tenantId),
-      where('storeId', '==', storeId)
-    );
-
-    this.salesUnsub = onSnapshot(salesQuery, (snap) => {
-      const list: SaleRecord[] = [];
-      snap.forEach(d => list.push(d.data() as SaleRecord));
-      list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      this.salesHistory.set(list);
-    });
-
-    // 2. Sync Z-Reports real-time
-    const zQuery = query(
-      collection(this.db, 'z_reports'),
-      where('tenantId', '==', tenantId),
-      where('storeId', '==', storeId)
-    );
-
-    this.zReportsUnsub = onSnapshot(zQuery, (snap) => {
-      const list: DailyZReportSnapshot[] = [];
-      snap.forEach(d => list.push(d.data() as DailyZReportSnapshot));
-      list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      this.zReports.set(list);
     });
   }
 

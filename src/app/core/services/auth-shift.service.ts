@@ -14,6 +14,7 @@ import {
   Unsubscribe 
 } from 'firebase/firestore';
 import { TenantContextService } from './tenant-context.service';
+import { RestaurantPosService } from './restaurant-pos.service';
 
 import { 
   Employee, 
@@ -354,7 +355,7 @@ export class AuthShiftService {
       this.activeWorkShift.set(existingShift);
     } else {
       this.clockInShift(`Σύνδεση χρήστη (${emp.name})`);
-    }
+   }
   }
 
   public checkActiveShiftOrAutoKick(): void {
