@@ -128,10 +128,10 @@ export class AuthShiftService {
   /**
    * Default staff seed including Master Manager 9999
    */
-  private getInitialStoreEmployees(tenantId: string, storeId: string): Employee[] {
+  public getInitialStoreEmployees(tenantId: string, storeId: string): Employee[] {
     return [
       { 
-        id: `${storeId}_emp_9999`, 
+        id: `emp_9999`, 
         name: 'Διαχειριστής (9999)', 
         pin: '9999', 
         pinCode: '9999', 
@@ -143,7 +143,7 @@ export class AuthShiftService {
         storeId 
       },
       { 
-        id: `${storeId}_emp_1111`, 
+        id: `emp_1111`, 
         name: 'Υπεύθυνος Βάρδιας', 
         pin: '1111', 
         pinCode: '1111', 
@@ -155,7 +155,7 @@ export class AuthShiftService {
         storeId 
       },
       { 
-        id: `${storeId}_emp_1234`, 
+        id: `emp_1234`, 
         name: 'Σερβιτόρος / Barista', 
         pin: '1234', 
         pinCode: '1234', 
@@ -181,6 +181,7 @@ public initFirestoreSync(db: Firestore): void {
 
     const tenantId = this.activeTenantId();
     const storeId = this.activeStoreId();
+    const initialSeed = this.getInitialStoreEmployees(tenantId, storeId );
 
     // 1. Sync Employees
     this.empSyncUnsub = onSnapshot(collection(this.db, 'employees'), (snap) => {
@@ -224,19 +225,12 @@ public initFirestoreSync(db: Firestore): void {
         }
       });
 
-      // Update global list of shifts
       this.workShifts.set(shiftList);
 
-      // Link current employee's own active shift
+      // Link current logged-in employee's active shift
       const currentEmp = this.currentEmployee();
       if (currentEmp) {
-        const myActive = shiftList.find(s => 
-          (s.employeeId === currentEmp.id || 
-           s.employeeId === currentEmp.pin || 
-           s.employeeName === currentEmp.name ||
-           (s.employeeId && currentEmp.id && s.employeeId.includes(currentEmp.pin))) && 
-          s.status === 'WORKING'
-        );
+        const myActive = this.getEmployeeActiveShift(currentEmp.id);
         this.activeWorkShift.set(myActive || null);
       }
     });
@@ -471,16 +465,32 @@ public initFirestoreSync(db: Firestore): void {
   }
 
  public getEmployeeActiveShift(empIdOrPin: string): WorkShiftLog | undefined {
+    if (!empIdOrPin) return undefined;
+    const target = String(empIdOrPin).trim().toLowerCase();
     const shifts = this.workShifts();
-    const emp = this.employees().find(e => e.id === empIdOrPin || e.pin === empIdOrPin || e.name === empIdOrPin);
+    const emp = this.employees().find(e => 
+      e.id.toLowerCase() === target || 
+      String(e.pin).toLowerCase() === target || 
+      e.name.toLowerCase() === target
+    );
+
+    const empPin = emp ? String(emp.pin).trim().toLowerCase() : '';
+    const empName = emp ? emp.name.trim().toLowerCase() : '';
+    const empId = emp ? emp.id.trim().toLowerCase() : target;
 
     return shifts.find(s => {
       if (s.status !== 'WORKING') return false;
-      if (s.employeeId === empIdOrPin) return true;
-      if (emp && (s.employeeId === emp.id || s.employeeId === emp.pin || s.employeeName === emp.name || s.employeeId.includes(emp.pin))) return true;
-      return false;
+      const sEmpId = String(s.employeeId || '').toLowerCase();
+      const sEmpName = String(s.employeeName || '').toLowerCase();
+
+      return (
+        sEmpId === target ||
+        sEmpId === empId ||
+        (empPin && sEmpId.includes(empPin)) ||
+        (empName && sEmpName.includes(empName))
+      );
     });
-  }
+   }
 
   // --- STAFF MANAGEMENT METHODS ---
 
