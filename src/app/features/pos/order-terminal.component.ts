@@ -308,10 +308,20 @@ export class OrderTerminalComponent implements OnInit {
     }
   }
 
-  public settlePayment(method: 'CASH' | 'CARD'): void {
+  public async settlePayment(method: 'CASH' | 'CARD'): Promise<void> {
     const tableId = this.activeTableId();
-    if (tableId) {
-      this.posService.settleTablePayment(tableId, method);
+    if (!tableId) return;
+
+    // 1. If there are pending items in cart, auto-send them first so receipt & KDS stay intact
+    if (this.hasPendingItems()) {
+      this.posService.sendOrderToKitchen(tableId);
+    }
+
+    // 2. Settle payment and route to floor plan
+    try {
+      await this.posService.settleTablePayment(tableId, method);
+    } catch (err) {
+      console.error('Payment error:', err);
     }
   }
 
