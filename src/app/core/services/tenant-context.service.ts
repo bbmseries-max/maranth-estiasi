@@ -1,13 +1,13 @@
 // src/app/core/services/tenant-context.service.ts
 
-import { Injectable, signal } from '@angular/core';
+import { Injectable, signal, computed } from '@angular/core';
 
 export interface StoreTenant {
   tenantId: string;
   storeId: string;
   storeName: string;
-  currency: string;
-  vatTiers: { food: number; alcohol: number };
+  currency?: string;
+  vatTiers?: { food: number; alcohol: number };
 }
 
 @Injectable({
@@ -31,8 +31,7 @@ export class TenantContextService {
     }
   ];
 
-  // Read saved values directly from localStorage during initialization
- public currentTenantId = signal<string>(
+  public currentTenantId = signal<string>(
     localStorage.getItem('active_tenant_id') || 'tirane-kafe-1974'
   );
   
@@ -40,15 +39,42 @@ export class TenantContextService {
     localStorage.getItem('active_store_id') || 'store-2'
   );
 
- public selectStore(store: StoreTenant): void {
-    this.currentTenantId.set(store.tenantId);
-    this.currentStoreId.set(store.storeId);
-    localStorage.setItem('active_tenant_id', store.tenantId);
-    localStorage.setItem('active_store_id', store.storeId);
+  // Backward-compatibility aliases
+  public activeTenantId = computed(() => this.currentTenantId());
+  public activeStoreId = computed(() => this.currentStoreId());
+  public tenantId = computed(() => this.currentTenantId());
+  public storeId = computed(() => this.currentStoreId());
+
+  /**
+   * Primary switcher method called by TenantSwitcherComponent
+   */
+  public setTenantAndStore(tenantId: string, storeId?: string): void {
+    const targetStoreId = storeId || (tenantId === 'tirane-kafe-1974' ? 'store-2' : 'store-1');
     
-    // Clear old employee session when switching stores
+    this.currentTenantId.set(tenantId);
+    this.currentStoreId.set(targetStoreId);
+    
+    localStorage.setItem('active_tenant_id', tenantId);
+    localStorage.setItem('active_store_id', targetStoreId);
+
+    // Clear previous employee session when switching stores to avoid state conflicts
     localStorage.removeItem('current_employee');
     localStorage.removeItem('maranth_pos_employee');
-    window.location.reload();
+
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
+  }
+
+  public selectStore(store: StoreTenant): void {
+    this.setTenantAndStore(store.tenantId, store.storeId);
+  }
+
+  public setTenant(tenantId: string): void {
+    this.setTenantAndStore(tenantId);
+  }
+
+  public setStore(storeId: string): void {
+    this.setTenantAndStore(this.currentTenantId(), storeId);
   }
 }
