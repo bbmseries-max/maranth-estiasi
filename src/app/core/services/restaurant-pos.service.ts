@@ -336,26 +336,25 @@ export class RestaurantPosService {
     return emp;
   }
 
- public setLoggedInEmployee(emp: Employee): void {
-  this.tableOrderService.clearAllNotifications();
-  this.authShiftService.setLoggedInEmployee(emp);
-  this.logAudit('CLOCK_IN', `Είσοδος στο σύστημα (${emp.name} - ${emp.role})`);
+public setLoggedInEmployee(emp: Employee): void {
+    this.tableOrderService.clearAllNotifications();
+    this.authShiftService.setLoggedInEmployee(emp);
+    this.logAudit('CLOCK_IN', `Είσοδος στο σύστημα (${emp.name} - ${emp.role})`);
 
-  // Reconnect listeners for this specific tenant/store
-  this.reconnectActiveStoreSync(emp);
+    // 1. Sync store context immediately
+    this.reconnectActiveStoreSync(emp);
 
-  // Check if open vault session exists for this employee
-  const existingVault = this.activeVaultSessions().find(
-    v => (v.waiterId === emp.id || v.waiterId === emp.pin || v.waiterName === emp.name) && v.status === 'OPEN'
-  );
+    // 2. Ensure active vault exists for this waiter
+    const existingVault = this.activeVaultSessions().find(
+      v => (v.waiterId === emp.id || v.waiterId === emp.pin || v.waiterName === emp.name) && v.status === 'OPEN'
+    );
 
-  if (!existingVault) {
-    // Force creation of active vault in Firestore
-    this.openWaiterVault(50);
-  } else {
-    this.activeVaultSession.set(existingVault);
+    if (!existingVault) {
+      this.openWaiterVault(0);
+    } else {
+      this.activeVaultSession.set(existingVault);
+    }
   }
-}
 
   public logoutEmployee(): void {
     this.authShiftService.logoutEmployee();
@@ -654,7 +653,7 @@ export class RestaurantPosService {
 
       // 2. Auto-create fallback vault if none was open and assign it properly
       if (!targetVault && currentEmp) {
-        this.openWaiterVault(50);
+        this.openWaiterVault(0);
         targetVault = this.activeVaultSession();
       }
 
@@ -691,83 +690,83 @@ export class RestaurantPosService {
 // Replace lines 463-500 in src/app/core/services/restaurant-pos.service.ts
 
  private initVaultsSync(): void {
-  if (!this.db) return;
+    if (!this.db) return;
 
-  if (this.activeVaultsUnsub) {
-    this.activeVaultsUnsub();
-  }
-
-  const { tenantId, storeId } = this.getActiveTenantAndStore();
-  const normTargetTenant = (tenantId || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
-  const normTargetStore = (storeId || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
-
-  this.activeVaultsUnsub = onSnapshot(collection(this.db, 'vaults'), (snap) => {
-    const vaultList: WaiterVaultSession[] = [];
-    
-    snap.forEach(docSnap => {
-      const data = docSnap.data() as WaiterVaultSession;
-      const vaultId = data.id || docSnap.id;
-
-      const docTenant = (data.tenantId || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
-      const docStore = (data.storeId || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
-
-      const matchesTenant = !docTenant || docTenant === normTargetTenant || docTenant.includes('tirane');
-      const matchesStore = !docStore || docStore === normTargetStore || docStore.includes('store2') || docStore.includes('store-2');
-
-      if (matchesTenant && matchesStore) {
-        vaultList.push({
-          ...data,
-          id: vaultId
-        });
-      }
-    });
-
-    vaultList.sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
-
-    this.allVaultSessions.set(vaultList);
-
-    const activeOnly = vaultList.filter(v => v.status === 'OPEN');
-    this.activeVaultSessions.set(activeOnly);
+    if (this.activeVaultsUnsub) {
+      this.activeVaultsUnsub();
+    }
 
     const currentEmp = this.currentEmployee();
-    if (currentEmp) {
-      const myActiveVault = activeOnly.find(v => 
-        v.waiterId === currentEmp.id || 
-        v.waiterId === currentEmp.pin || 
-        v.waiterName === currentEmp.name ||
-        (v.waiterId && currentEmp.pin && v.waiterId.includes(currentEmp.pin))
-      );
-      this.activeVaultSession.set(myActiveVault || null);
-    } else {
-      this.activeVaultSession.set(null);
-    }
-  });
-}
+    const activeTenant = currentEmp?.tenantId || 'Tirane kafe 1974';
+    const activeStore = currentEmp?.storeId || 'store-2';
 
-  public openWaiterVault(startingFloat: number = 50): void {
+    const normTargetTenant = activeTenant.trim().toLowerCase().replace(/[\s_-]+/g, '');
+    const normTargetStore = activeStore.trim().toLowerCase().replace(/[\s_-]+/g, '');
+
+    this.activeVaultsUnsub = onSnapshot(collection(this.db, 'vaults'), (snap) => {
+      const vaultList: WaiterVaultSession[] = [];
+      
+      snap.forEach(docSnap => {
+        const data = docSnap.data() as WaiterVaultSession;
+        const vaultId = data.id || docSnap.id;
+
+        const docTenant = (data.tenantId || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+        const docStore = (data.storeId || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+
+        const matchesTenant = !docTenant || docTenant === normTargetTenant || docTenant.includes('tirane');
+        const matchesStore = !docStore || docStore === normTargetStore || docStore.includes('store2') || docStore.includes('store-2');
+
+        if (matchesTenant && matchesStore) {
+          vaultList.push({
+            ...data,
+            id: vaultId
+          });
+        }
+      });
+
+      vaultList.sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
+
+      this.allVaultSessions.set(vaultList);
+
+      const activeOnly = vaultList.filter(v => v.status === 'OPEN');
+      this.activeVaultSessions.set(activeOnly);
+
+      const emp = this.currentEmployee();
+      if (emp) {
+        const myActiveVault = activeOnly.find(v => 
+          v.waiterId === emp.id || 
+          v.waiterId === emp.pin || 
+          v.waiterName === emp.name ||
+          (v.waiterId && emp.pin && v.waiterId.includes(emp.pin))
+        );
+        this.activeVaultSession.set(myActiveVault || null);
+      } else {
+        this.activeVaultSession.set(null);
+      }
+    });
+  }
+public openWaiterVault(startingFloat: number = 0): void {
     const emp = this.currentEmployee();
     if (!emp) return;
 
-    const { tenantId, storeId } = this.getActiveTenantAndStore();
-    const cleanFloat = startingFloat >= 0 ? startingFloat : 50;
+    // Use employee's own tenant & store (e.g. 'Tirane kafe 1974' / 'store-2')
+    const tenantId = emp.tenantId || 'Tirane kafe 1974';
+    const storeId = emp.storeId || 'store-2';
+    const cleanFloat = startingFloat >= 0 ? startingFloat : 0;
 
     const existingOpenVault = this.activeVaultSessions().find(
-      v => (v.waiterId === emp.id || v.waiterName === emp.name) && v.status === 'OPEN'
+      v => (v.waiterId === emp.id || v.waiterId === emp.pin || v.waiterName === emp.name) && v.status === 'OPEN'
     );
     
     if (existingOpenVault) {
-      if (existingOpenVault.startingFloat !== cleanFloat) {
-        this.updateWaiterVaultFloat(existingOpenVault.id, cleanFloat);
-      } else {
-        this.activeVaultSession.set(existingOpenVault);
-      }
+      this.activeVaultSession.set(existingOpenVault);
       return;
     }
 
     const vault: WaiterVaultSession = {
       id: `VAULT-${emp.id}-${Date.now()}`,
-      tenantId: emp.tenantId || tenantId,
-      storeId: emp.storeId || storeId,
+      tenantId: tenantId,
+      storeId: storeId,
       shiftLogId: `SHIFT-${emp.id}-${Date.now()}`,
       waiterId: emp.id,
       waiterName: emp.name,
@@ -778,12 +777,14 @@ export class RestaurantPosService {
       status: 'OPEN'
     };
 
+    // Update in-memory signals immediately for zero UI lag
     this.activeVaultSession.set(vault);
-    this.activeVaultSessions.update(list => [vault, ...list.filter(v => v.waiterId !== emp.id)]);
+    this.activeVaultSessions.update(list => [vault, ...list.filter(v => v.waiterId !== emp.id && v.id !== vault.id)]);
     this.allVaultSessions.update(list => [vault, ...list.filter(v => v.id !== vault.id)]);
 
+    // Persist to Firestore
     if (this.db) {
-      setDoc(doc(this.db, 'vaults', vault.id), cleanUndefined(vault)).catch(err => {
+      setDoc(doc(this.db, 'vaults', vault.id), cleanUndefined(vault), { merge: true }).catch(err => {
         console.error('Error opening vault in Firestore:', err);
       });
     }

@@ -264,61 +264,43 @@ public initFirestoreSync(db: Firestore): void {
     return store.substring(0, 2).toUpperCase();
   }
 
-  public loginWithPin(pin: string): Employee | null {
-    let cleanPin = String(pin).trim().toUpperCase();
-    const currentTenant = this.activeTenantId();
-    const currentStore = this.activeStoreId();
-    const prefix = this.getStorePrefix();
+ // Inside src/app/core/services/auth-shift.service.ts
 
-    // Strip out prefix if typed manually (e.g., "TK-9999" or "TK9999" -> "9999")
-    if (cleanPin.startsWith(`${prefix}-`)) {
-      cleanPin = cleanPin.replace(`${prefix}-`, '');
-    } else if (cleanPin.startsWith(prefix)) {
-      cleanPin = cleanPin.substring(prefix.length);
-    }
+public loginWithPin(pin: string): Employee | null {
+  const cleanPin = String(pin).trim();
+  const activeTenant = (this.activeTenantId() || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+  const activeStore = (this.activeStoreId() || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
 
-    // 1. Search employees strictly matching this store AND clean PIN
-    let employee = this.employees().find(e => {
-      const matchStore = !e.storeId || e.storeId === currentStore;
-      const matchPin = String(e.pin).trim() === cleanPin || String(e.pinCode).trim() === cleanPin;
-      return matchStore && matchPin && e.isActive !== false;
-    });
+  const availableEmployees = this.employees();
 
-    // 2. Exact fallback profiles with store prefix in display name
-    if (!employee) {
-      const predefinedStaff: Record<string, { name: string; role: Role; rate: number }> = {
-        '9999': { name: `[${prefix}] Διαχειριστής`, role: 'MANAGER', rate: 10.0 },
-        '1111': { name: `[${prefix}] Υπεύθυνος Βάρδιας`, role: 'MANAGER', rate: 8.5 },
-        '1234': { name: `[${prefix}] Σερβιτόρος 1`, role: 'WAITER', rate: 6.5 },
-        '5555': { name: `[${prefix}] Σερβιτόρος 2`, role: 'WAITER', rate: 6.5 }
-      };
+  // 1. Prioritize employee matching PIN AND current store context
+  let emp = availableEmployees.find(e => {
+    const pinMatch = String(e.pin).trim() === cleanPin || String(e.pinCode).trim() === cleanPin;
+    if (!pinMatch) return false;
 
-      if (predefinedStaff[cleanPin]) {
-        const seed = predefinedStaff[cleanPin];
-        employee = {
-          id: `${currentStore}_emp_${cleanPin}`,
-          name: seed.name,
-          pin: cleanPin,
-          pinCode: `${prefix}-${cleanPin}`, // Combined PIN code: "TK-9999"
-          role: seed.role,
-          hourlyRate: seed.rate,
-          isActive: true,
-          active: true,
-          tenantId: currentTenant,
-          storeId: currentStore
-        };
+    const eTenant = (e.tenantId || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+    const eStore = (e.storeId || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
 
-        this.employees.update(list => [employee!, ...list.filter(e => String(e.pin).trim() !== cleanPin)]);
-      }
-    }
+    const tenantMatch = !eTenant || eTenant === activeTenant || eTenant.includes('tirane');
+    const storeMatch = !eStore || eStore === activeStore || eStore === 'all' || eStore.includes('store2') || eStore.includes('store-2');
 
-    if (employee) {
-      this.setLoggedInEmployee(employee);
-      return employee;
-    }
+    return tenantMatch && storeMatch;
+  });
 
-    return null;
+  // 2. Fallback: match any employee by PIN if no exact store match
+  if (!emp) {
+    emp = availableEmployees.find(e => 
+      String(e.pin).trim() === cleanPin || String(e.pinCode).trim() === cleanPin
+    );
   }
+
+  if (emp) {
+    this.setLoggedInEmployee(emp);
+    return emp;
+  }
+
+  return null;
+}
 
   /**
    * 🧹 Emergency / Maintenance: Flushes all lingering open shifts in Firestore
