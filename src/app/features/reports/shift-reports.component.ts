@@ -197,10 +197,39 @@ public async flushAllShifts(): Promise<void> {
     }
   }
 
-  public async closeSingleStaffShift(emp: Employee): Promise<void> {
-    if (confirm(`Θέλετε να κλείσετε τη βάρδια για τον υπάλληλο: ${emp.name};`)) {
-      await this.authShiftService.clockOutEmployeeShift(emp.id, `Κλείσιμο βάρδιας (${emp.name})`);
-      alert(`Η βάρδια για τον ${emp.name} έκλεισε επιτυχώς.`);
-    }
+ public async closeSingleStaffShift(emp: Employee): Promise<void> {
+  if (!confirm(`Θέλετε να κλείσετε τη βάρδια για τον υπάλληλο: ${emp.name};`)) {
+    return;
   }
+
+  try {
+    // 1. Clock out the shift in Firestore and signals
+    await this.authShiftService.clockOutEmployeeShift(emp.id, `Χειροκίνητο κλείσιμο βάρδιας (${emp.name})`);
+
+    // 2. Also close any open cash vault session belonging to this employee
+    const activeVaults = this.posService.activeVaultSessions();
+    const employeeVault = activeVaults.find(
+      v => (v.waiterId === emp.id || v.waiterId === emp.pin || v.waiterName === emp.name) && v.status === 'OPEN'
+    );
+    if (employeeVault) {
+      await this.posService.closeWaiterVaultSession({
+        ...employeeVault,
+        status: 'CLOSED',
+        closedAt: new Date().toISOString()
+      });
+    }
+
+    // 3. 🟢 If the closed employee is the CURRENTLY LOGGED-IN USER, log them out to prevent auto-clockin
+    const current = this.authShiftService.currentEmployee();
+    if (current && (current.id === emp.id || current.pin === emp.pin)) {
+      this.authShiftService.logoutEmployee();
+    } else {
+      alert(`Η βάρδια για τον υπάλληλο ${emp.name} έκλεισε επιτυχώς.`);
+    }
+
+  } catch (err) {
+    console.error('Error closing staff shift:', err);
+    alert('Σφάλμα κατά το κλείσιμο της βάρδιας.');
+  }
+}
 }

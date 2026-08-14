@@ -203,7 +203,7 @@ export class AuthShiftService {
       }
     });
 
-    // 2. Sync Shifts (Reads ALL shifts and filters gracefully in memory)
+   // In auth-shift.service.ts inside this.shiftSyncUnsub onSnapshot:
     this.shiftSyncUnsub = onSnapshot(collection(this.db, 'shifts'), (snap) => {
       const shiftList: WorkShiftLog[] = [];
       
@@ -211,7 +211,7 @@ export class AuthShiftService {
         const data = docSnap.data() as WorkShiftLog;
         const shiftId = data.id || docSnap.id;
         
-        // Accept shifts belonging to this store OR legacy shifts (where tenantId is missing)
+        // Include matching store shifts or legacy shifts
         const isStoreMatch = !data.tenantId || data.tenantId === tenantId;
         if (isStoreMatch) {
           shiftList.push({
@@ -223,7 +223,7 @@ export class AuthShiftService {
 
       this.workShifts.set(shiftList);
 
-      // Link active shift for currently logged-in employee
+      // Only link if there is a real WORKING shift
       const currentEmp = this.currentEmployee();
       if (currentEmp) {
         const myActive = shiftList.find(s => 
