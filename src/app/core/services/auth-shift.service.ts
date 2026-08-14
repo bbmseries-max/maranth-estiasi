@@ -352,15 +352,14 @@ export class AuthShiftService {
     return newShift;
   }
 
-  public async clockOutEmployeeShift(empIdOrPinOrName: string, notes?: string): Promise<void> {
+ public async clockOutEmployeeShift(empIdOrPinOrName: string, notes?: string): Promise<void> {
     if (!empIdOrPinOrName) return;
     const targetKey = empIdOrPinOrName.trim();
     const nowStr = new Date().toISOString();
 
-    const currentShifts = this.workShifts();
-    
-    // Match against employeeId (e.g. 'EMP-2101'), PIN ('9999'), Name, or Shift ID
-    const matchingActiveShifts = currentShifts.filter(s => 
+    // 1. Identify all matching open shifts
+    const allShifts = this.workShifts();
+    const matchingShifts = allShifts.filter(s => 
       s.status === 'WORKING' && 
       (s.employeeId === targetKey || 
        s.employeeName === targetKey || 
@@ -369,38 +368,34 @@ export class AuthShiftService {
        s.employeeId.includes(targetKey))
     );
 
-    // 1. Update state in memory immediately
-    const updatedShifts = currentShifts.map(s => {
-      const isMatch = matchingActiveShifts.some(m => m.id === s.id);
-      if (isMatch) {
+    // 2. Update local state immediately
+    const updatedShifts = allShifts.map(s => {
+      const isTarget = matchingShifts.some(m => m.id === s.id);
+      if (isTarget) {
         return {
           ...s,
           status: 'COMPLETED' as const,
           clockOutTime: nowStr,
-          notes: notes || s.notes || 'Κλείσιμο βάρδιας'
+          notes: notes || 'Κλείσιμο βάρδιας'
         };
       }
       return s;
     });
 
     this.workShifts.set(updatedShifts);
+    this.activeWorkShift.set(null);
 
-    const currentEmp = this.currentEmployee();
-    if (currentEmp && (currentEmp.id === targetKey || currentEmp.pin === targetKey || currentEmp.name === targetKey)) {
-      this.activeWorkShift.set(null);
-    }
-
-    // 2. Update Firestore for all matching documents
-    if (this.db && matchingActiveShifts.length > 0) {
-      for (const shift of matchingActiveShifts) {
-        const closedRecord = {
+    // 3. Persist every matching open shift document to Firestore
+    if (this.db) {
+      for (const shift of matchingShifts) {
+        const closedShiftRecord = {
           ...shift,
           status: 'COMPLETED',
           clockOutTime: nowStr,
           notes: notes || shift.notes || 'Κλείσιμο βάρδιας'
         };
         try {
-          await setDoc(doc(this.db, 'shifts', shift.id), cleanUndefined(closedRecord), { merge: true });
+          await setDoc(doc(this.db, 'shifts', shift.id), cleanUndefined(closedShiftRecord), { merge: true });
         } catch (err) {
           console.error('Error closing shift in Firestore:', err);
         }

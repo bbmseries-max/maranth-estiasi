@@ -715,32 +715,45 @@ public loginWithPin(pin: string): Employee | null {
     this.closeWaiterVaultSession(closedVault);
   }
 
-  public async closeWaiterVaultSession(closedSession: WaiterVaultSession): Promise<void> {
-  // 1. Mark Vault as CLOSED in local state
-  this.activeVaultSessions.update(list => list.filter(s => s.id !== closedSession.id));
-  this.allVaultSessions.update(list => list.map(s => s.id === closedSession.id ? closedSession : s));
+public async closeWaiterVaultSession(closedSession: WaiterVaultSession): Promise<void> {
+    const nowStr = new Date().toISOString();
 
-  if (this.activeVaultSession()?.id === closedSession.id) {
-    this.activeVaultSession.set(null);
-  }
+    // 1. Mark Vault as CLOSED locally
+    const finalizedVault: WaiterVaultSession = {
+      ...closedSession,
+      status: 'CLOSED',
+      closedAt: nowStr
+    };
 
-  // 2. Persist closed vault to Firestore
-  if (this.db) {
-    try {
-      await setDoc(doc(this.db, 'vaults', closedSession.id), cleanUndefined(closedSession), { merge: true });
-    } catch (err) {
-      console.error('Error updating vault in Firestore:', err);
+    this.activeVaultSessions.update(list => list.filter(v => v.id !== closedSession.id));
+    this.allVaultSessions.update(list => list.map(v => v.id === closedSession.id ? finalizedVault : v));
+    
+    if (this.activeVaultSession()?.id === closedSession.id) {
+      this.activeVaultSession.set(null);
     }
+
+    // 2. Persist Vault Closure to Firestore
+    if (this.db && closedSession.id) {
+      try {
+        await setDoc(doc(this.db, 'vaults', closedSession.id), cleanUndefined(finalizedVault), { merge: true });
+      } catch (err) {
+        console.error('Error saving closed vault to Firestore:', err);
+      }
+    }
+
+    // 3. Close the Employee's Work Shift in AuthShiftService
+    const waiterKey = closedSession.waiterId || closedSession.waiterName;
+    await this.authShiftService.clockOutEmployeeShift(waiterKey, `Κλείσιμο ταμείου (${closedSession.waiterName})`);
+
+    // 4. Force active shift local signal to null
+    this.authShiftService.activeWorkShift.set(null);
+
+    // 5. Log Security Audit
+    this.logAudit(
+      'VAULT_CLOSED',
+      `Κλείσιμο ταμείου & έξοδος βάρδιας: ${closedSession.waiterName}. Μετρητά: €${(closedSession.cashHandedOver || 0).toFixed(2)}`
+    );
   }
-
-  // 3. 🟢 Explicitly close the employee shift and persist COMPLETED status
-  await this.authShiftService.clockOutEmployeeShift(closedSession.waiterId);
-
-  this.logAudit(
-    'VAULT_CLOSED',
-    `Κλείσιμο ταμείου & έξοδος βάρδιας - ${closedSession.waiterName}. Παραδόθηκαν: €${closedSession.cashHandedOver?.toFixed(2) || '0.00'}`
-  );
-}
 
   // --- Z-REPORT & SYSTEM RESET ---
   public closeDayAndGenerateZReport(): DailyZReportSnapshot {
