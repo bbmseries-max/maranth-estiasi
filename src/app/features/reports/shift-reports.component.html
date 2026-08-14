@@ -1,9 +1,11 @@
 <div class="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
       
-  <!-- TOP NAVIGATION BAR -->
-  <header class="h-16 bg-slate-900 border-b border-slate-800 px-4 md:px-6 flex items-center justify-between shadow-xl sticky top-0 z-40">
-    <div class="flex items-center gap-4">
-      <a routerLink="/floor-plan" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs no-underline flex items-center gap-1.5 transition-all border border-slate-700/60 shadow-sm">
+  <!-- TOP NAVIGATION & TAB BAR (RESPONSIVE) -->
+  <header class="bg-slate-900 border-b border-slate-800 px-4 md:px-6 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xl sticky top-0 z-40 min-h-[4rem]">
+    
+    <!-- LEFT: TITLE & BACK -->
+    <div class="flex items-center gap-3 shrink-0">
+      <a routerLink="/floor-plan" class="h-10 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs no-underline flex items-center gap-1.5 transition-all border border-slate-700/60 shadow-sm cursor-pointer">
         <span>⬅️</span>
         <span class="hidden sm:inline">Πλάνο Τραπεζιών</span>
         <span class="sm:hidden">Πλάνο</span>
@@ -13,14 +15,14 @@
           <span>📊</span>
           <span>Αναφορές & Z-Report</span>
         </h1>
-        <span class="text-[10px] text-amber-400 font-bold tracking-wide">Ταμεία Σερβιτόρων • Βάρδιες • Αρχείο Ασφαλείας</span>
+        <span class="text-[10px] text-amber-400 font-bold tracking-wide hidden sm:block">Ταμεία • Βάρδιες • Αρχείο Ασφαλείας</span>
       </div>
     </div>
 
-    <!-- TAB SELECTOR BUTTONS -->
-    <div class="flex items-center gap-1.5 sm:gap-2">
+    <!-- RIGHT / BOTTOM: TAB SELECTOR BUTTONS (WRAPS TO FULL WIDTH ON MOBILE) -->
+    <div class="flex items-center gap-2 overflow-x-auto hide-scrollbar w-full sm:w-auto sm:flex-1 sm:justify-end order-last sm:order-none pb-1 sm:pb-0">
       <button (click)="activeTab.set('Z_REPORT')"
-              class="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5"
+              class="h-10 px-3.5 sm:px-4 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
               [ngClass]="activeTab() === 'Z_REPORT' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-lg shadow-amber-500/20' : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-700'">
         <span>🧾</span>
         <span class="hidden sm:inline">Z-Report & Τζίρος</span>
@@ -28,7 +30,7 @@
       </button>
 
       <button (click)="activeTab.set('VAULTS')"
-              class="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 relative"
+              class="h-10 px-3.5 sm:px-4 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 relative whitespace-nowrap"
               [ngClass]="activeTab() === 'VAULTS' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-lg shadow-amber-500/20' : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-700'">
         <span>👛</span>
         <span>Βάρδιες & Ταμεία</span>
@@ -41,7 +43,7 @@
       </button>
 
       <button (click)="activeTab.set('AUDIT')"
-              class="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5"
+              class="h-10 px-3.5 sm:px-4 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
               [ngClass]="activeTab() === 'AUDIT' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-lg shadow-amber-500/20' : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-700'">
         <span>🛡️</span>
         <span class="hidden md:inline">Αρχείο Ασφαλείας</span>
@@ -388,7 +390,7 @@
                       <span>{{ emp.name }}</span>
                     </td>
                     <td class="py-3.5 px-3 text-slate-400 font-medium">
-                    {{ posService.getRoleLabel(emp.role) }}
+                      {{ posService.getRoleLabel(emp.role) }}
                     </td>
                     <td class="py-3.5 px-3 text-amber-400 font-mono">
                       {{ activeShift?.clockInTime ? (activeShift.clockInTime | date:'shortTime') : '-' }}
