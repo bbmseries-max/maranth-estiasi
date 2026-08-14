@@ -46,7 +46,7 @@ export class TenantContextService {
   public storeId = computed(() => this.currentStoreId());
 
   /**
-   * Primary switcher method called by TenantSwitcherComponent
+   * Primary switcher method
    */
   public setTenantAndStore(tenantId: string, storeId?: string): void {
     const targetStoreId = storeId || (tenantId === 'tirane-kafe-1974' ? 'store-2' : 'store-1');
@@ -57,7 +57,7 @@ export class TenantContextService {
     localStorage.setItem('active_tenant_id', tenantId);
     localStorage.setItem('active_store_id', targetStoreId);
 
-    // Clear previous employee session when switching stores to avoid state conflicts
+    // Clear previous employee session when switching stores
     localStorage.removeItem('current_employee');
     localStorage.removeItem('maranth_pos_employee');
 
