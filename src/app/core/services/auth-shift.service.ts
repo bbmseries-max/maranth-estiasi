@@ -7,7 +7,6 @@ import {
   collection, 
   doc, 
   setDoc, 
-  getDocs, 
   updateDoc, 
   onSnapshot, 
   query, 
@@ -51,12 +50,11 @@ export class AuthShiftService {
   public workShifts = signal<WorkShiftLog[]>([]);
   public activeWorkShift = signal<WorkShiftLog | null>(null);
 
-  // Multi-Tenancy Computations (Always prioritizing active employee -> localStorage -> service signal)
+  // Multi-Tenancy Computations
   public activeTenantId = computed(() => 
     this.currentEmployee()?.tenantId || 
     localStorage.getItem('active_tenant_id') || 
     (this.tenantContext as any).currentTenantId?.() || 
-    (this.tenantContext as any).tenantId?.() || 
     'coffee-shop-demo'
   );
 
@@ -64,8 +62,6 @@ export class AuthShiftService {
     this.currentEmployee()?.storeId || 
     localStorage.getItem('active_store_id') || 
     (this.tenantContext as any).currentStoreId?.() || 
-    (this.tenantContext as any).activeStoreId?.() || 
-    (this.tenantContext as any).storeId?.() || 
     'store-1'
   );
 
@@ -76,7 +72,7 @@ export class AuthShiftService {
     return role === 'MANAGER' || role === 'ADMIN' || role === 'OWNER';
   });
 
-  // 🔒 Multi-Store Isolated Shifts List
+  // Multi-Store Isolated Shifts List
   public storeShifts = computed(() => {
     const tenantId = this.activeTenantId();
     const storeId = this.activeStoreId();
@@ -104,25 +100,24 @@ export class AuthShiftService {
 
     let wasShiftActive = false;
 
-    // Monitor shift status changes in real time for auto-logout
+    // Monitor shift status changes for non-manager auto-logout
     effect(() => {
       const currentEmp = this.currentEmployee();
       const shifts = this.workShifts();
-
       const role = (currentEmp?.role as string)?.toUpperCase() || '';
 
-      // Skip auto-logout checks for Managers / Admins / Owners or unauthenticated states
       if (!currentEmp || role === 'MANAGER' || role === 'ADMIN' || role === 'OWNER') {
         wasShiftActive = false;
         return;
       }
 
-      const activeShift = shifts.find(s => s.employeeId === currentEmp.id && s.status === 'WORKING');
+      const activeShift = shifts.find(s => 
+        (s.employeeId === currentEmp.id || s.employeeId === currentEmp.pin) && s.status === 'WORKING'
+      );
 
       if (activeShift) {
         wasShiftActive = true;
       } else if (wasShiftActive) {
-        console.warn(`[AuthShiftService] Shift closed remotely for ${currentEmp.name}. Logging out...`);
         wasShiftActive = false;
         this.logoutEmployee();
       }
@@ -130,15 +125,15 @@ export class AuthShiftService {
   }
 
   /**
-   * Generates dynamic initial seed employees for clean new store onboarding
+   * Default staff seed including Master Manager 9999
    */
   private getInitialStoreEmployees(tenantId: string, storeId: string): Employee[] {
     return [
       { 
-        id: `${storeId}_emp_1`, 
-        name: 'Διαχειριστής', 
-        pin: '1111', 
-        pinCode: '1111', 
+        id: `${storeId}_emp_9999`, 
+        name: 'Διαχειριστής (9999)', 
+        pin: '9999', 
+        pinCode: '9999', 
         role: 'MANAGER', 
         hourlyRate: 10.0, 
         isActive: true, 
@@ -147,8 +142,20 @@ export class AuthShiftService {
         storeId 
       },
       { 
-        id: `${storeId}_emp_2`, 
-        name: 'Demo Barista', 
+        id: `${storeId}_emp_1111`, 
+        name: 'Υπεύθυνος Βάρδιας', 
+        pin: '1111', 
+        pinCode: '1111', 
+        role: 'MANAGER', 
+        hourlyRate: 8.5, 
+        isActive: true, 
+        active: true, 
+        tenantId, 
+        storeId 
+      },
+      { 
+        id: `${storeId}_emp_1234`, 
+        name: 'Σερβιτόρος / Barista', 
         pin: '1234', 
         pinCode: '1234', 
         role: 'WAITER', 
@@ -162,9 +169,9 @@ export class AuthShiftService {
   }
 
   /**
-   * Initialize Firestore listeners for live employees & work shifts strictly isolated by storeId
+   * Initialize Firestore listeners for live employees & work shifts
    */
-  public initFirestoreSync(db: Firestore): void {
+ public initFirestoreSync(db: Firestore): void {
     this.db = db;
     if (!this.db) return;
 
@@ -174,51 +181,55 @@ export class AuthShiftService {
     const tenantId = this.activeTenantId();
     const storeId = this.activeStoreId();
 
-    // 1. Sync Employees collection real-time (Store-Isolated)
-    const empQuery = query(
-      collection(this.db, 'employees'),
-      where('tenantId', '==', tenantId),
-      where('storeId', '==', storeId)
-    );
-
-    this.empSyncUnsub = onSnapshot(empQuery, (snap) => {
-      if (!snap.empty) {
-        const empList: Employee[] = [];
-        snap.forEach(docSnap => {
-          empList.push(docSnap.data() as Employee);
-        });
-        this.employees.set(empList);
-      } else {
-        // If empty and running in demo mode, populate default seed
-        if (tenantId === 'coffee-shop-demo') {
-          const initialSeedEmployees = this.getInitialStoreEmployees(tenantId, storeId);
-          this.employees.set(initialSeedEmployees);
-          initialSeedEmployees.forEach(emp => {
-            setDoc(doc(this.db!, 'employees', emp.id), cleanUndefined(emp)).catch(() => {});
-          });
+    // 1. Sync Employees (Handle both scoped and legacy documents)
+    this.empSyncUnsub = onSnapshot(collection(this.db, 'employees'), (snap) => {
+      const allEmps: Employee[] = [];
+      snap.forEach(docSnap => {
+        const data = docSnap.data() as Employee;
+        const empId = data.id || docSnap.id;
+        
+        // Match if matches active store OR is global/legacy
+        const matchesStore = !data.tenantId || data.tenantId === tenantId || data.storeId === storeId;
+        if (matchesStore) {
+          allEmps.push({ ...data, id: empId });
         }
+      });
+
+      if (allEmps.length > 0) {
+        this.employees.set(allEmps);
+      } else {
+        const initialSeed = this.getInitialStoreEmployees(tenantId, storeId);
+        this.employees.set(initialSeed);
       }
     });
 
-    // 2. Sync Work Shifts collection real-time (Store-Isolated)
-    const shiftQuery = query(
-      collection(this.db, 'shifts'),
-      where('tenantId', '==', tenantId),
-      where('storeId', '==', storeId)
-    );
-
-    this.shiftSyncUnsub = onSnapshot(shiftQuery, (snap) => {
+    // 2. Sync Shifts (Reads ALL shifts and filters gracefully in memory)
+    this.shiftSyncUnsub = onSnapshot(collection(this.db, 'shifts'), (snap) => {
       const shiftList: WorkShiftLog[] = [];
+      
       snap.forEach(docSnap => {
-        shiftList.push(docSnap.data() as WorkShiftLog);
+        const data = docSnap.data() as WorkShiftLog;
+        const shiftId = data.id || docSnap.id;
+        
+        // Accept shifts belonging to this store OR legacy shifts (where tenantId is missing)
+        const isStoreMatch = !data.tenantId || data.tenantId === tenantId;
+        if (isStoreMatch) {
+          shiftList.push({
+            ...data,
+            id: shiftId
+          });
+        }
       });
 
       this.workShifts.set(shiftList);
 
-      // Update activeWorkShift Signal for current employee
+      // Link active shift for currently logged-in employee
       const currentEmp = this.currentEmployee();
       if (currentEmp) {
-        const myActive = shiftList.find(s => s.employeeId === currentEmp.id && s.status === 'WORKING');
+        const myActive = shiftList.find(s => 
+          (s.employeeId === currentEmp.id || s.employeeId === currentEmp.pin || s.employeeName === currentEmp.name) && 
+          s.status === 'WORKING'
+        );
         this.activeWorkShift.set(myActive || null);
       }
     });
@@ -227,13 +238,39 @@ export class AuthShiftService {
   public logoutEmployee(): void {
     this.currentEmployee.set(null);
     this.activeWorkShift.set(null);
+    localStorage.removeItem('current_employee');
+    localStorage.removeItem('maranth_pos_employee');
     this.router.navigate(['/login']);
   }
 
   // --- AUTHENTICATION METHODS ---
 
-public loginWithPin(pin: string): Employee | null {
-    const employee = this.employees().find(e => e.pin === pin && e.isActive);
+  public loginWithPin(pin: string): Employee | null {
+    const cleanPin = pin.trim();
+    let employee = this.employees().find(e => (e.pin === cleanPin || e.pinCode === cleanPin) && e.isActive !== false);
+
+    // 🟢 Fallback for Master Manager 9999 if not yet written to Firestore
+    if (!employee && cleanPin === '9999') {
+      const tenantId = this.activeTenantId();
+      const storeId = this.activeStoreId();
+      employee = {
+        id: `${storeId}_emp_9999`,
+        name: 'Διαχειριστής (9999)',
+        pin: '9999',
+        pinCode: '9999',
+        role: 'MANAGER',
+        hourlyRate: 10.0,
+        isActive: true,
+        active: true,
+        tenantId,
+        storeId
+      };
+
+      this.employees.update(list => [employee!, ...list.filter(e => e.pin !== '9999')]);
+      if (this.db) {
+        setDoc(doc(this.db, 'employees', employee.id), cleanUndefined(employee)).catch(() => {});
+      }
+    }
 
     if (employee) {
       this.setLoggedInEmployee(employee);
@@ -248,20 +285,19 @@ public loginWithPin(pin: string): Employee | null {
     localStorage.setItem('current_employee', JSON.stringify(emp));
     localStorage.setItem('maranth_pos_employee', JSON.stringify(emp));
 
-    // 🟢 1. Check if an active shift already exists in memory or state
+    // Check if shift already exists
     const existingShift = this.workShifts().find(
-      s => s.employeeId === emp.id && s.status === 'WORKING'
+      s => (s.employeeId === emp.id || s.employeeId === emp.pin || s.employeeName === emp.name) && s.status === 'WORKING'
     );
 
     if (existingShift) {
       this.activeWorkShift.set(existingShift);
     } else {
-      // 🟢 2. Automatically create and clock in a brand new shift
       this.clockInShift(`Σύνδεση χρήστη (${emp.name})`);
     }
   }
 
-public checkActiveShiftOrAutoKick(): void {
+  public checkActiveShiftOrAutoKick(): void {
     const current = this.currentEmployee();
     if (!current) return;
 
@@ -277,103 +313,114 @@ public checkActiveShiftOrAutoKick(): void {
   // --- SHIFT LOGGING METHODS ---
 
   public clockInShift(notes?: string): WorkShiftLog | null {
-  const emp = this.currentEmployee();
-  if (!emp) return null;
+    const emp = this.currentEmployee();
+    if (!emp) return null;
 
-  const tenantId = this.activeTenantId();
-  const storeId = this.activeStoreId();
+    const tenantId = this.activeTenantId();
+    const storeId = this.activeStoreId();
 
-  // Check if already working to avoid duplicate open shifts
-  const existingActive = this.workShifts().find(
-    s => s.employeeId === emp.id && s.status === 'WORKING'
-  );
-  if (existingActive) {
-    this.activeWorkShift.set(existingActive);
-    return existingActive;
-  }
+    const existingActive = this.workShifts().find(
+      s => (s.employeeId === emp.id || s.employeeId === emp.pin || s.employeeName === emp.name) && s.status === 'WORKING'
+    );
 
-  const newShift: WorkShiftLog = {
-    id: `SHIFT-${emp.id}-${Date.now()}`,
-    employeeId: emp.id,
-    employeeName: emp.name,
-    tenantId: emp.tenantId || tenantId,
-    storeId: emp.storeId || storeId,
-    clockInTime: new Date().toISOString(),
-    status: 'WORKING',
-    notes: notes || 'Έναρξη βάρδιας',
-    hourlyRateAtShift: emp.hourlyRate || 10.0
-  };
-
-  // 1. Update local signals synchronously
-  this.activeWorkShift.set(newShift);
-  this.workShifts.update(list => [newShift, ...list.filter(s => s.employeeId !== emp.id || s.status !== 'WORKING')]);
-
-  // 2. Persist to Firestore
-  if (this.db) {
-    setDoc(doc(this.db, 'shifts', newShift.id), cleanUndefined(newShift)).catch(err => {
-      console.error('Error saving shift in Firestore:', err);
-    });
-  }
-
-  return newShift;
-}
-
- public async clockOutEmployeeShift(empId: string, notes?: string): Promise<void> {
-  const currentShifts = this.workShifts();
-  const nowStr = new Date().toISOString();
-
-  // Find all active working shifts for this employee
-  const matchingActiveShifts = currentShifts.filter(
-    s => (s.employeeId === empId || s.employeeName === empId) && s.status === 'WORKING'
-  );
-
-  const updatedShifts = currentShifts.map(s => {
-    if ((s.employeeId === empId || s.employeeName === empId) && s.status === 'WORKING') {
-      return {
-        ...s,
-        status: 'COMPLETED' as const,
-        clockOutTime: nowStr,
-        notes: notes || s.notes || 'Κλείσιμο βάρδιας'
-      };
+    if (existingActive) {
+      this.activeWorkShift.set(existingActive);
+      return existingActive;
     }
-    return s;
-  });
 
-  // 1. Update local signals
-  this.workShifts.set(updatedShifts);
-  if (this.activeWorkShift()?.employeeId === empId) {
-    this.activeWorkShift.set(null);
+    const newShift: WorkShiftLog = {
+      id: `SHIFT-${emp.id}-${Date.now()}`,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      tenantId: emp.tenantId || tenantId,
+      storeId: emp.storeId || storeId,
+      clockInTime: new Date().toISOString(),
+      status: 'WORKING',
+      notes: notes || 'Έναρξη βάρδιας',
+      hourlyRateAtShift: emp.hourlyRate || 10.0
+    };
+
+    this.activeWorkShift.set(newShift);
+    this.workShifts.update(list => [newShift, ...list.filter(s => s.id !== newShift.id)]);
+
+    if (this.db) {
+      setDoc(doc(this.db, 'shifts', newShift.id), cleanUndefined(newShift)).catch(err => {
+        console.error('Error saving shift in Firestore:', err);
+      });
+    }
+
+    return newShift;
   }
 
-  // 2. Persist to Firestore for all matching shifts
-  if (this.db) {
-    for (const shift of matchingActiveShifts) {
-      const closedRecord = {
-        ...shift,
-        status: 'COMPLETED',
-        clockOutTime: nowStr,
-        notes: notes || shift.notes || 'Κλείσιμο βάρδιας'
-      };
-      try {
-        await setDoc(doc(this.db, 'shifts', shift.id), cleanUndefined(closedRecord), { merge: true });
-      } catch (err) {
-        console.error('Error closing shift in Firestore:', err);
+  public async clockOutEmployeeShift(empIdOrPinOrName: string, notes?: string): Promise<void> {
+    if (!empIdOrPinOrName) return;
+    const targetKey = empIdOrPinOrName.trim();
+    const nowStr = new Date().toISOString();
+
+    const currentShifts = this.workShifts();
+    
+    // Match against employeeId (e.g. 'EMP-2101'), PIN ('9999'), Name, or Shift ID
+    const matchingActiveShifts = currentShifts.filter(s => 
+      s.status === 'WORKING' && 
+      (s.employeeId === targetKey || 
+       s.employeeName === targetKey || 
+       s.id === targetKey ||
+       targetKey.includes(s.employeeId) || 
+       s.employeeId.includes(targetKey))
+    );
+
+    // 1. Update state in memory immediately
+    const updatedShifts = currentShifts.map(s => {
+      const isMatch = matchingActiveShifts.some(m => m.id === s.id);
+      if (isMatch) {
+        return {
+          ...s,
+          status: 'COMPLETED' as const,
+          clockOutTime: nowStr,
+          notes: notes || s.notes || 'Κλείσιμο βάρδιας'
+        };
+      }
+      return s;
+    });
+
+    this.workShifts.set(updatedShifts);
+
+    const currentEmp = this.currentEmployee();
+    if (currentEmp && (currentEmp.id === targetKey || currentEmp.pin === targetKey || currentEmp.name === targetKey)) {
+      this.activeWorkShift.set(null);
+    }
+
+    // 2. Update Firestore for all matching documents
+    if (this.db && matchingActiveShifts.length > 0) {
+      for (const shift of matchingActiveShifts) {
+        const closedRecord = {
+          ...shift,
+          status: 'COMPLETED',
+          clockOutTime: nowStr,
+          notes: notes || shift.notes || 'Κλείσιμο βάρδιας'
+        };
+        try {
+          await setDoc(doc(this.db, 'shifts', shift.id), cleanUndefined(closedRecord), { merge: true });
+        } catch (err) {
+          console.error('Error closing shift in Firestore:', err);
+        }
       }
     }
   }
-}
 
-  public getEmployeeActiveShift(empId: string): WorkShiftLog | undefined {
+  public getEmployeeActiveShift(empIdOrPin: string): WorkShiftLog | undefined {
     const shifts = this.workShifts();
-    const current = this.currentEmployee();
+    const emp = this.employees().find(e => e.id === empIdOrPin || e.pin === empIdOrPin || e.name === empIdOrPin);
 
-    return shifts.find(s => 
-      (s.employeeId === empId || (current && current.id === empId && s.employeeId === current.pin)) 
-      && s.status === 'WORKING'
-    );
+    return shifts.find(s => {
+      if (s.status !== 'WORKING') return false;
+      if (s.employeeId === empIdOrPin) return true;
+      if (emp && (s.employeeId === emp.id || s.employeeId === emp.pin || s.employeeName === emp.name)) return true;
+      return false;
+    });
   }
 
-  // --- STAFF MANAGEMENT & BIOMETRICS ---
+  // --- STAFF MANAGEMENT METHODS ---
 
   public addEmployee(empData: { name: string; pinCode: string; role: Role; hourlyRate: number }): { success: boolean; message: string; employee?: Employee } {
     const cleanPin = empData.pinCode.trim();
@@ -457,7 +504,10 @@ public checkActiveShiftOrAutoKick(): void {
             name: employee.name,
             displayName: employee.name
           },
-          pubKeyCredParams: [{ alg: -7, type: 'public-key' }, { alg: -257, type: 'public-key' }],
+          pubKeyCredParams: [
+            { alg: -7, type: 'public-key' }, 
+            { alg: -257, type: 'public-key' }
+          ],
           authenticatorSelection: {
             authenticatorAttachment: 'platform',
             userVerification: 'required'
