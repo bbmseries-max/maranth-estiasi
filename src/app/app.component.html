@@ -108,6 +108,18 @@
           <span class="text-[10px] text-emerald-400 font-medium">● {{ getRoleBadgeLabel(emp.role) }}</span>
         </div>
 
+        @if (authShiftService.currentEmployee(); as emp) {
+  <div class="flex items-center gap-2">
+    <span class="text-sm font-semibold text-white">{{ emp.name }}</span>
+    <button 
+      (click)="endMyShift()" 
+      class="px-2.5 py-1 text-xs font-bold bg-red-800 hover:bg-red-700 text-white rounded-lg border border-red-600 shadow"
+      title="Κλείσιμο της δικής μου βάρδιας και αποσύνδεση">
+      🚪 Έξοδος & Κλείσιμο
+    </button>
+  </div>
+}
+
         <button (click)="posService.logoutEmployee()" 
                 class="px-3 py-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
                 title="Έξοδος">

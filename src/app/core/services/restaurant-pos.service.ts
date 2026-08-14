@@ -95,7 +95,18 @@ export class RestaurantPosService {
   public activeOrders = this.tableOrderService.activeOrders;
   public unreadReadyNotifications = this.tableOrderService.unreadReadyNotifications;
   public occupiedTables = this.tableOrderService.occupiedTables;
-  public totalLiveFloorRevenue = this.tableOrderService.totalLiveFloorRevenue;
+  public totalLiveFloorRevenue = computed(() => {
+    const activeTables = this.tables().filter(t => t.status !== 'FREE' && t.activeOrder);
+    
+    return activeTables.reduce((sum, t) => {
+      const items = t.activeOrder?.items || [];
+      const tableTotal = items
+        .filter(item => item.status !== 'VOIDED')
+        .reduce((itemSum, item) => itemSum + ((item.unitPrice || 0) * (item.quantity || 1)), 0);
+      
+      return Number((sum + tableTotal).toFixed(2));
+    }, 0);
+  });
 
   // --- FINANCIAL & REPORTING SIGNALS ---
   public allVaultSessions = signal<WaiterVaultSession[]>([]);
@@ -348,6 +359,13 @@ public loginWithPin(pin: string): Employee | null {
   public async seedDefaultMenuForCurrentStore(): Promise<void> {
     const tenantId = this.tenantContext.currentTenantId();
     const storeId = this.tenantContext.currentStoreId();
+
+    const starterCategories = [
+      { id: `${storeId}_cat_coffee`, name: 'Καφέδες & Ροφήματα', code: 'COFFEE', icon: '☕', order: 1, tenantId, storeId },
+      { id: `${storeId}_cat_drinks`, name: 'Αναψυκτικά & Χυμοί', code: 'DRINKS', icon: '🥤', order: 2, tenantId, storeId },
+      { id: `${storeId}_cat_food`, name: 'Σνακ & Φαγητό', code: 'FOOD', icon: '🥪', order: 3, tenantId, storeId },
+      { id: `${storeId}_cat_bar`, name: 'Μπύρες & Ποτά', code: 'BAR', icon: '🍺', order: 4, tenantId, storeId }
+    ];
 
     const starterProducts: Product[] = [
       { id: `${storeId}_prod_1`, name: 'Espresso', price: 1.80, categoryId: 'COFFEE', taxRate: 13, isActive: true, tenantId, storeId },

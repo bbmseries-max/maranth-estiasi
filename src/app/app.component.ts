@@ -6,7 +6,7 @@ import { MenuSeederService } from './core/services/menu-seeder.service';
 import { AutoLogoutService } from './core/services/auto-logout.service';
 import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 import { RestaurantPosService } from './core/services/restaurant-pos.service';
-import { EmployeeRole } from './core/modals/restaurant-pos.modals';
+import { AuthShiftService } from './core/services/auth-shift.service';
 
 @Component({
   selector: 'app-root',
@@ -21,6 +21,7 @@ export class AppComponent implements OnInit {
   private menuService = inject(MenuService);
 
   public posService = inject(RestaurantPosService);
+  public authShiftService = inject(AuthShiftService);
   public isBellDrawerOpen = signal<boolean>(false);
 
   async ngOnInit() {
@@ -69,6 +70,16 @@ export class AppComponent implements OnInit {
       case 'KITCHEN':
       case 'CHEF': return 'Κουζίνα';
       default: return role;
+    }
+  }
+
+  public async endMyShift(): Promise<void> {
+    const current = this.authShiftService.currentEmployee();
+    if (!current) return;
+
+    if (confirm(`Είστε σίγουρος ότι θέλετε να κλείσετε τη βάρδια σας και να αποσυνδεθείτε;`)) {
+      await this.authShiftService.clockOutEmployeeShift(current.id, `Έξοδος υπαλλήλου (${current.name})`);
+      this.authShiftService.logoutEmployee();
     }
   }
 }
