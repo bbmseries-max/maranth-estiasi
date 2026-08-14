@@ -698,7 +698,6 @@ export class RestaurantPosService {
 
     const { tenantId, storeId } = this.getActiveTenantAndStore();
 
-    // Listen to the 'vaults' collection with relaxed matching (like AuthShiftService)
     this.activeVaultsUnsub = onSnapshot(collection(this.db, 'vaults'), (snap) => {
       const vaultList: WaiterVaultSession[] = [];
       
@@ -706,7 +705,6 @@ export class RestaurantPosService {
         const data = docSnap.data() as WaiterVaultSession;
         const vaultId = data.id || docSnap.id;
 
-        // Match if belongs to active tenant OR is global/legacy
         const matchesTenant = !data.tenantId || data.tenantId === tenantId;
         const matchesStore = !data.storeId || data.storeId === storeId;
 
@@ -727,8 +725,11 @@ export class RestaurantPosService {
 
       const emp = this.currentEmployee();
       if (emp) {
-        const myActiveVault = activeOnly.find(
-          v => v.waiterId === emp.id || v.waiterId === emp.pin || v.waiterName === emp.name
+        const myActiveVault = activeOnly.find(v => 
+          v.waiterId === emp.id || 
+          v.waiterId === emp.pin || 
+          v.waiterName === emp.name ||
+          (v.waiterId && emp.pin && v.waiterId.includes(emp.pin))
         );
         this.activeVaultSession.set(myActiveVault || null);
       } else {

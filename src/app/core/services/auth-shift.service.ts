@@ -172,7 +172,7 @@ export class AuthShiftService {
   /**
    * Initialize Firestore listeners for live employees & work shifts
    */
- public initFirestoreSync(db: Firestore): void {
+public initFirestoreSync(db: Firestore): void {
     this.db = db;
     if (!this.db) return;
 
@@ -182,16 +182,17 @@ export class AuthShiftService {
     const tenantId = this.activeTenantId();
     const storeId = this.activeStoreId();
 
-    // 1. Sync Employees (Handle both scoped and legacy documents)
+    // 1. Sync Employees
     this.empSyncUnsub = onSnapshot(collection(this.db, 'employees'), (snap) => {
       const allEmps: Employee[] = [];
       snap.forEach(docSnap => {
         const data = docSnap.data() as Employee;
         const empId = data.id || docSnap.id;
         
-        // Match if matches active store OR is global/legacy
-        const matchesStore = !data.tenantId || data.tenantId === tenantId || data.storeId === storeId;
-        if (matchesStore) {
+        const matchesTenant = !data.tenantId || data.tenantId === tenantId;
+        const matchesStore = !data.storeId || data.storeId === storeId;
+
+        if (matchesTenant && matchesStore) {
           allEmps.push({ ...data, id: empId });
         }
       });
@@ -204,7 +205,7 @@ export class AuthShiftService {
       }
     });
 
-   // In auth-shift.service.ts inside this.shiftSyncUnsub onSnapshot:
+    // 2. Sync All Shifts across the entire store (All Managers & Staff visible)
     this.shiftSyncUnsub = onSnapshot(collection(this.db, 'shifts'), (snap) => {
       const shiftList: WorkShiftLog[] = [];
       
@@ -212,9 +213,10 @@ export class AuthShiftService {
         const data = docSnap.data() as WorkShiftLog;
         const shiftId = data.id || docSnap.id;
         
-        // Include matching store shifts or legacy shifts
-        const isStoreMatch = !data.tenantId || data.tenantId === tenantId;
-        if (isStoreMatch) {
+        const matchesTenant = !data.tenantId || data.tenantId === tenantId;
+        const matchesStore = !data.storeId || data.storeId === storeId;
+
+        if (matchesTenant && matchesStore) {
           shiftList.push({
             ...data,
             id: shiftId
@@ -222,13 +224,17 @@ export class AuthShiftService {
         }
       });
 
+      // Update global list of shifts
       this.workShifts.set(shiftList);
 
-      // Only link if there is a real WORKING shift
+      // Link current employee's own active shift
       const currentEmp = this.currentEmployee();
       if (currentEmp) {
         const myActive = shiftList.find(s => 
-          (s.employeeId === currentEmp.id || s.employeeId === currentEmp.pin || s.employeeName === currentEmp.name) && 
+          (s.employeeId === currentEmp.id || 
+           s.employeeId === currentEmp.pin || 
+           s.employeeName === currentEmp.name ||
+           (s.employeeId && currentEmp.id && s.employeeId.includes(currentEmp.pin))) && 
           s.status === 'WORKING'
         );
         this.activeWorkShift.set(myActive || null);
@@ -236,7 +242,7 @@ export class AuthShiftService {
     });
   }
 
-  public logoutEmployee(): void {
+    public logoutEmployee(): void {
     this.currentEmployee.set(null);
     this.activeWorkShift.set(null);
     localStorage.removeItem('current_employee');
@@ -464,14 +470,14 @@ export class AuthShiftService {
     }
   }
 
-  public getEmployeeActiveShift(empIdOrPin: string): WorkShiftLog | undefined {
+ public getEmployeeActiveShift(empIdOrPin: string): WorkShiftLog | undefined {
     const shifts = this.workShifts();
     const emp = this.employees().find(e => e.id === empIdOrPin || e.pin === empIdOrPin || e.name === empIdOrPin);
 
     return shifts.find(s => {
       if (s.status !== 'WORKING') return false;
       if (s.employeeId === empIdOrPin) return true;
-      if (emp && (s.employeeId === emp.id || s.employeeId === emp.pin || s.employeeName === emp.name)) return true;
+      if (emp && (s.employeeId === emp.id || s.employeeId === emp.pin || s.employeeName === emp.name || s.employeeId.includes(emp.pin))) return true;
       return false;
     });
   }
