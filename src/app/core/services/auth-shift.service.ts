@@ -188,31 +188,18 @@ public initFirestoreSync(db: Firestore): void {
 
     // 1. Sync Employees
     this.empSyncUnsub = onSnapshot(collection(this.db, 'employees'), (snap) => {
-      const allEmps: Employee[] = [];
-      
-      snap.forEach(docSnap => {
-        const data = docSnap.data() as Employee;
-        const empId = data.id || docSnap.id;
-        
-        const docTenant = (data.tenantId || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
-        const docStore = (data.storeId || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+  const allEmps: Employee[] = [];
+  
+  snap.forEach(docSnap => {
+    const data = docSnap.data() as Employee;
+    const empId = data.id || docSnap.id;
+    allEmps.push({ ...data, id: empId });
+  });
 
-        // Matches exact or normalized tenant ("Tirane kafe 1974" vs "tirane-kafe-1974")
-        const matchesTenant = !docTenant || docTenant === normTargetTenant || docTenant.includes('tirane');
-        const matchesStore = !docStore || docStore === normTargetStore || docStore.includes('store2') || docStore.includes('store-2');
-
-        if (matchesTenant && matchesStore) {
-          allEmps.push({ ...data, id: empId });
-        }
-      });
-
-      if (allEmps.length > 0) {
-        this.employees.set(allEmps);
-      } else {
-        const fallbackSeed = this.getInitialStoreEmployees(tenantId, storeId);
-        this.employees.set(fallbackSeed);
-      }
-    });
+  if (allEmps.length > 0) {
+    this.employees.set(allEmps);
+  }
+});
 
     // 2. Sync All Shifts (All Managers & Staff visible)
     this.shiftSyncUnsub = onSnapshot(collection(this.db, 'shifts'), (snap) => {

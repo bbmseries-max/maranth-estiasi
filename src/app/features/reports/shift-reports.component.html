@@ -265,86 +265,90 @@
         </div>
         
         <!-- MULTI-WAITER ACTIVE VAULT CARDS -->
-        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col gap-5">
-          <div class="flex justify-between items-center border-b border-slate-800 pb-4">
-            <div>
-              <h2 class="text-base font-black text-white uppercase tracking-wider m-0 flex items-center gap-2">
-                <span>👛</span>
-                <span>Ενεργά Ταμεία Σερβιτόρων ({{ activeVaults().length }})</span>
-              </h2>
-              <span class="text-xs text-slate-400 mt-0.5 block">Ζωντανή παρακολούθηση μετρητών και καρτών ανά χειριστή</span>
+<div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col gap-5">
+  <div class="flex justify-between items-center border-b border-slate-800 pb-4">
+    <div>
+      <h2 class="text-base font-black text-white uppercase tracking-wider m-0 flex items-center gap-2">
+        <span>👛</span>
+        <span>Ενεργά Ταμεία Σερβιτόρων ({{ activeVaults().length }})</span>
+      </h2>
+      <span class="text-xs text-slate-400 mt-0.5 block">Ζωντανή παρακολούθηση μετρητών και καρτών ανά χειριστή</span>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    @for (vault of activeVaults(); track vault.id) {
+      <div class="bg-slate-950 border border-amber-500/40 hover:border-amber-500/70 rounded-2xl p-5 flex flex-col justify-between gap-4 shadow-lg transition-all">
+        
+        <div class="flex justify-between items-start border-b border-slate-800/80 pb-3">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-black text-xs border border-amber-500/30">
+                {{ (vault.waiterName || 'Σ').charAt(0) }}
+              </span>
+              <span class="text-sm font-black text-white">{{ vault.waiterName || 'Σερβιτόρος' }}</span>
+            </div>
+            <span class="text-[11px] text-slate-400 block mt-1">
+              Έναρξη: {{ vault.openedAt ? (vault.openedAt | date:'shortTime') : '-' }}
+            </span>
+          </div>
+
+          <span class="text-[10px] bg-emerald-500/10 text-emerald-400 px-2.5 py-1 rounded-full font-bold border border-emerald-500/30 flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            Ενεργό
+          </span>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 text-center text-xs bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+          <div class="flex flex-col items-center">
+            <span class="text-slate-400 text-[10px]">Αρχικό Ταμείο</span>
+            <div class="flex items-center gap-1 mt-1">
+              <span class="font-bold text-white font-mono">€{{ (vault.startingFloat || 0).toFixed(2) }}</span>
+              <button (click)="promptEditStartingFloat(vault)" 
+                      class="text-[11px] text-amber-400 hover:text-amber-300 font-bold cursor-pointer" title="Τροποποίηση Ρέστων">
+                ✏️
+              </button>
             </div>
           </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            @for (vault of activeVaults(); track vault.id) {
-              <div class="bg-slate-950 border border-amber-500/40 hover:border-amber-500/70 rounded-2xl p-5 flex flex-col justify-between gap-4 shadow-lg transition-all">
-                
-                <div class="flex justify-between items-start border-b border-slate-800/80 pb-3">
-                  <div>
-                    <div class="flex items-center gap-2">
-                      <span class="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-black text-xs border border-amber-500/30">
-                        {{ vault.waiterName.charAt(0) }}
-                      </span>
-                      <span class="text-sm font-black text-white">{{ vault.waiterName }}</span>
-                    </div>
-                    <span class="text-[11px] text-slate-400 block mt-1">Έναρξη: {{ vault.openedAt | date:'shortTime' }}</span>
-                  </div>
-
-                  <span class="text-[10px] bg-emerald-500/10 text-emerald-400 px-2.5 py-1 rounded-full font-bold border border-emerald-500/30 flex items-center gap-1">
-                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    Ενεργό
-                  </span>
-                </div>
-
-                <div class="grid grid-cols-3 gap-2 text-center text-xs bg-slate-900/80 p-3 rounded-xl border border-slate-800">
-                  <div class="flex flex-col items-center">
-                    <span class="text-slate-400 text-[10px]">Αρχικό Ταμείο</span>
-                    <div class="flex items-center gap-1 mt-1">
-                      <span class="font-bold text-white font-mono">€{{ vault.startingFloat.toFixed(2) }}</span>
-                      <button (click)="promptEditStartingFloat(vault)" 
-                              class="text-[11px] text-amber-400 hover:text-amber-300 font-bold cursor-pointer" title="Τροποποίηση Ρέστων">
-                        ✏️
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <span class="text-slate-400 block text-[10px]">Μετρητά</span>
-                    <span class="font-bold text-emerald-400 mt-1 block font-mono">€{{ vault.cashCollected.toFixed(2) }}</span>
-                  </div>
-                  <div>
-                    <span class="text-slate-400 block text-[10px]">Κάρτες</span>
-                    <span class="font-bold text-sky-400 mt-1 block font-mono">€{{ vault.cardCollected.toFixed(2) }}</span>
-                  </div>
-                </div>
-
-                <div class="flex justify-between items-center px-1 text-xs">
-                  <span class="text-slate-400">Αναμενόμενα Μετρητά:</span>
-                  <span class="font-black text-amber-400 font-mono text-sm">€{{ (vault.startingFloat + vault.cashCollected).toFixed(2) }}</span>
-                </div>
-
-                <div class="flex items-center gap-2 pt-1">
-                  <button (click)="printVaultReceipt(vault)"
-                          class="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 font-bold text-xs shadow transition cursor-pointer flex items-center justify-center gap-1.5">
-                    <span>🖨️</span>
-                    <span>Εκτύπωση</span>
-                  </button>
-
-                  <button (click)="openCloseVaultModal(vault)"
-                          class="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs shadow-md transition cursor-pointer flex items-center justify-center gap-1.5">
-                    <span>🔒</span>
-                    <span>Κλείσιμο</span>
-                  </button>
-                </div>
-              </div>
-            } @empty {
-              <div class="col-span-full py-10 bg-slate-950/40 rounded-2xl border border-dashed border-slate-800 text-center text-slate-500 text-xs font-bold flex flex-col items-center gap-2">
-                <span class="text-2xl">👛</span>
-                <span>Δεν υπάρχουν ανοιχτά ταμεία σερβιτόρων αυτή τη στιγμή.</span>
-              </div>
-            }
+          <div>
+            <span class="text-slate-400 block text-[10px]">Μετρητά</span>
+            <span class="font-bold text-emerald-400 mt-1 block font-mono">€{{ (vault.cashCollected || 0).toFixed(2) }}</span>
+          </div>
+          <div>
+            <span class="text-slate-400 block text-[10px]">Κάρτες</span>
+            <span class="font-bold text-sky-400 mt-1 block font-mono">€{{ (vault.cardCollected || 0).toFixed(2) }}</span>
           </div>
         </div>
+
+        <div class="flex justify-between items-center px-1 text-xs">
+          <span class="text-slate-400">Αναμενόμενα Μετρητά:</span>
+          <span class="font-black text-amber-400 font-mono text-sm">
+            €{{ ((vault.startingFloat || 0) + (vault.cashCollected || 0)).toFixed(2) }}
+          </span>
+        </div>
+
+        <div class="flex items-center gap-2 pt-1">
+          <button (click)="printVaultReceipt(vault)"
+                  class="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 font-bold text-xs shadow transition cursor-pointer flex items-center justify-center gap-1.5">
+            <span>🖨️</span>
+            <span>Εκτύπωση</span>
+          </button>
+
+          <button (click)="openCloseVaultModal(vault)"
+                  class="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs shadow-md transition cursor-pointer flex items-center justify-center gap-1.5">
+            <span>🔒</span>
+            <span>Κλείσιμο</span>
+          </button>
+        </div>
+      </div>
+    } @empty {
+      <div class="col-span-full py-10 bg-slate-950/40 rounded-2xl border border-dashed border-slate-800 text-center text-slate-500 text-xs font-bold flex flex-col items-center gap-2">
+        <span class="text-2xl">👛</span>
+        <span>Δεν υπάρχουν ανοιχτά ταμεία σερβιτόρων αυτή τη στιγμή.</span>
+      </div>
+    }
+  </div>
+</div>
 
         <!-- LIVE SHIFT PAYROLL & HOURS SUMMARY TABLE -->
         <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col gap-4">
