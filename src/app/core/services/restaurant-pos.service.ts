@@ -61,6 +61,8 @@ function cleanUndefined(obj: any): any {
   providedIn: 'root'
 })
 export class RestaurantPosService {
+  
+  
   public tenantContext = inject(TenantContextService);
   public db: any = null;
   private router = inject(Router);
@@ -204,7 +206,7 @@ export class RestaurantPosService {
 
   public liveFloorRevenue = computed(() => this.totalLiveFloorRevenue());
 
-  // --- FINANCIAL & REPORTING SIGNALS ---
+ // --- FINANCIAL & REPORTING SIGNALS ---
   public allVaultSessions = signal<WaiterVaultSession[]>([]);
   public activeVaultSessions = signal<WaiterVaultSession[]>([]);
   public activeVaultSession = signal<WaiterVaultSession | null>(null);
@@ -212,16 +214,17 @@ export class RestaurantPosService {
   public zReports = signal<DailyZReportSnapshot[]>([]);
   public salesHistory = signal<SaleRecord[]>([]);
 
+  // ✅ FIX 1: Compute from ALL vaults today (OPEN + CLOSED) so closed shift money is NEVER lost!
   public totalDailyCashInVaults = computed(() => {
-    return this.activeVaultSessions().reduce((acc, v) => acc + (v.cashCollected || 0), 0);
+    return this.allVaultSessions().reduce((acc, v) => acc + (v.cashCollected || 0), 0);
   });
 
   public totalDailyCardInVaults = computed(() => {
-    return this.activeVaultSessions().reduce((acc, v) => acc + (v.cardCollected || 0), 0);
+    return this.allVaultSessions().reduce((acc, v) => acc + (v.cardCollected || 0), 0);
   });
 
   public totalDailyStartingFloats = computed(() => {
-    return this.activeVaultSessions().reduce((acc, v) => acc + (v.startingFloat || 0), 0);
+    return this.allVaultSessions().reduce((acc, v) => acc + (v.startingFloat || 0), 0);
   });
 
   public totalDailyGrossSales = computed(() => {
