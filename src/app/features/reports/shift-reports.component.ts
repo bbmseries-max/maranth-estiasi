@@ -1,3 +1,5 @@
+// src/app/features/reports/shift-reports.component.ts
+
 import { Component, inject, signal, computed, OnInit, OnDestroy, ChangeDetectionStrategy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule, DatePipe, CurrencyPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -31,7 +33,6 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
   public actualHandedCash: number = 0;
   public now = signal<number>(Date.now());
 
-  // 🔒 Direct computed signals to guarantee OnPush view reactivity
   public activeVaults = computed(() => this.posService.activeVaultSessions());
   public employeesList = computed(() => this.posService.employees());
   public workShiftsList = computed(() => this.posService.workShifts());
@@ -50,7 +51,6 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     const currentEmp = this.posService.currentEmployee();
     if (currentEmp) {
-      // Re-trigger live store sync to attach listeners for Tirane kafe 1974
       this.posService.reconnectActiveStoreSync(currentEmp);
     }
 
@@ -101,15 +101,17 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
     this.cdr.markForCheck();
   }
 
-  public confirmVaultClose(vault: WaiterVaultSession): void {
+  public async confirmVaultClose(vault: WaiterVaultSession): Promise<void> {
     const expected = Number((vault.startingFloat + vault.cashCollected).toFixed(2));
     const count = Number(this.actualHandedCash) || 0;
     const variance = Number((count - expected).toFixed(2));
 
-    // 1. Print Receipt
-    this.printVaultReceipt(vault, count);
+    try {
+      this.printVaultReceipt(vault, count);
+    } catch (e) {
+      console.warn('Printer offline:', e);
+    }
 
-    // 2. Delegate Vault Close & Employee Clock-Out to POS Service
     const closedVault: WaiterVaultSession = {
       ...vault,
       closedAt: new Date().toISOString(),
@@ -119,9 +121,8 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
       status: 'CLOSED'
     };
 
-    this.posService.closeWaiterVaultSession(closedVault);
+    await this.posService.closeWaiterVaultSession(closedVault);
 
-    // 3. Close Modal & force view update
     this.closingVault.set(null);
     this.cdr.markForCheck();
   }
@@ -177,11 +178,12 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
     }
   }
 
-public async flushAllShifts(): Promise<void> {
+  public async flushAllShifts(): Promise<void> {
     try {
       if (confirm('Θέλετε να κλείσουν όλες οι εκκρεμείς/παλιές βάρδιες;')) {
         await this.authShiftService.closeAllActiveShifts();
         alert('Όλες οι παλιές βάρδιες έκλεισαν επιτυχώς!');
+        this.cdr.markForCheck();
       }
     } catch (err) {
       console.error('Failed to flush shifts:', err);
@@ -197,39 +199,36 @@ public async flushAllShifts(): Promise<void> {
     }
   }
 
- public async closeSingleStaffShift(emp: Employee): Promise<void> {
-  if (!confirm(`Θέλετε να κλείσετε τη βάρδια για τον υπάλληλο: ${emp.name};`)) {
-    return;
-  }
-
-  try {
-    // 1. Clock out the shift in Firestore and signals
-    await this.authShiftService.clockOutEmployeeShift(emp.id, `Χειροκίνητο κλείσιμο βάρδιας (${emp.name})`);
-
-    // 2. Also close any open cash vault session belonging to this employee
+  public async closeSingleStaffShift(emp: Employee): Promise<void> {
+    const cleanPin = (emp.pinCode || emp.pin || '').trim();
     const activeVaults = this.posService.activeVaultSessions();
     const employeeVault = activeVaults.find(
-      v => (v.waiterId === emp.id || v.waiterId === emp.pin || v.waiterName === emp.name) && v.status === 'OPEN'
+      v => (v.waiterId === emp.id || v.waiterId === cleanPin || v.waiterName === emp.name) && v.status === 'OPEN'
     );
+
     if (employeeVault) {
-      await this.posService.closeWaiterVaultSession({
-        ...employeeVault,
-        status: 'CLOSED',
-        closedAt: new Date().toISOString()
-      });
+      // Direct user to the counting modal so money is counted and properly credited
+      this.openCloseVaultModal(employeeVault);
+      return;
     }
 
-    // 3. 🟢 If the closed employee is the CURRENTLY LOGGED-IN USER, log them out to prevent auto-clockin
-    const current = this.authShiftService.currentEmployee();
-    if (current && (current.id === emp.id || current.pin === emp.pin)) {
-      this.authShiftService.logoutEmployee();
-    } else {
-      alert(`Η βάρδια για τον υπάλληλο ${emp.name} έκλεισε επιτυχώς.`);
+    if (!confirm(`Θέλετε να κλείσετε τη βάρδια για τον υπάλληλο: ${emp.name};`)) {
+      return;
     }
 
-  } catch (err) {
-    console.error('Error closing staff shift:', err);
-    alert('Σφάλμα κατά το κλείσιμο της βάρδιας.');
+    try {
+      await this.authShiftService.clockOutEmployeeShift(emp.id, `Χειροκίνητο κλείσιμο βάρδιας (${emp.name})`);
+      
+      const current = this.posService.currentEmployee();
+      if (current && (current.id === emp.id || current.name === emp.name)) {
+        this.posService.logoutEmployee();
+      } else {
+        alert(`Η βάρδια για τον υπάλληλο ${emp.name} έκλεισε επιτυχώς.`);
+      }
+      this.cdr.markForCheck();
+    } catch (err) {
+      console.error('Error closing staff shift:', err);
+      alert('Σφάλμα κατά το κλείσιμο της βάρδιας.');
+    }
   }
-}
 }

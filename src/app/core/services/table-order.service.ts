@@ -640,7 +640,7 @@ export class TableOrderService {
     }
   }
 
-  public async settleTablePayment(
+ public async settleTablePayment(
     tableId: string, 
     paymentMethod: 'CASH' | 'CARD' | 'DEBT', 
     currentEmp: Employee | null, 
@@ -648,6 +648,17 @@ export class TableOrderService {
   ): Promise<void> {
     const table = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
     if (!table) return;
+
+    // ⛔ Strict Prevention: Check for unsent kitchen items
+    if (table.activeOrder && table.activeOrder.items) {
+      const unsentItems = table.activeOrder.items.filter(item => item.status === 'PENDING');
+      if (unsentItems.length > 0) {
+        alert(
+          `⚠️ Υπάρχουν ${unsentItems.length} εκκρεμή προϊόντα που δεν έχουν σταλεί στην κουζίνα!\n\nΠαρακαλώ πατήστε "Αποστολή" στην κουζίνα πριν την εξόφληση.`
+        );
+        return;
+      }
+    }
 
     const { tenantId, storeId } = this.getActiveTenantAndStore();
     const grandTotal = Number(table.activeOrder?.grandTotal || table.currentTotal || 0);
