@@ -307,14 +307,28 @@ export class AuthShiftService {
     return newShift;
   }
 
-  public async clockOutEmployeeShift(empIdOrPinOrName: string, notes?: string): Promise<void> {
+  // In src/app/core/services/auth-shift.service.ts
+
+  public async clockOutEmployeeShift(
+    empIdOrPinOrName: string, 
+    notes?: string,
+    financialSummary?: {
+      startingFloat?: number;
+      cashCollected?: number;
+      cardCollected?: number;
+      expectedCash?: number;
+      actualCash?: number;
+      cashVariance?: number;
+      totalSales?: number;
+    }
+  ): Promise<void> {
     if (!empIdOrPinOrName) return;
     const targetKey = String(empIdOrPinOrName).trim().toLowerCase();
     const nowStr = new Date().toISOString();
 
     const allShifts = this.workShifts();
     
-    // Exact matching to prevent closing other employees' shifts
+    // Match only this employee's active shift
     const matchingShifts = allShifts.filter(s => 
       s.status === 'WORKING' && 
       (
@@ -331,7 +345,8 @@ export class AuthShiftService {
           ...s,
           status: 'COMPLETED' as const,
           clockOutTime: nowStr,
-          notes: notes || 'Κλείσιμο βάρδιας'
+          notes: notes || 'Κλείσιμο βάρδιας',
+          ...(financialSummary || {})
         };
       }
       return s;
@@ -350,7 +365,8 @@ export class AuthShiftService {
           ...shift,
           status: 'COMPLETED',
           clockOutTime: nowStr,
-          notes: notes || shift.notes || 'Κλείσιμο βάρδιας'
+          notes: notes || shift.notes || 'Κλείσιμο βάρδιας',
+          ...(financialSummary || {})
         };
         try {
           await setDoc(doc(this.db, 'shifts', shift.id), cleanUndefined(closedShiftRecord), { merge: true });
