@@ -366,9 +366,10 @@ export class RestaurantPosService {
 
     this.logAudit('CLOCK_IN', `Είσοδος στο σύστημα (${emp.name} - ${emp.role})`);
 
-    // Ensure active vault exists immediately
     const cleanPin = (emp.pinCode || emp.pin || '').trim();
-    const existingVault = this.activeVaultSessions().find(
+    
+    // Check both active signal and all sessions for existing open drawer
+    const existingVault = this.allVaultSessions().find(
       v => (
         v.waiterId === emp.id || 
         v.waiterId === cleanPin || 
@@ -377,10 +378,11 @@ export class RestaurantPosService {
       ) && v.status === 'OPEN'
     );
 
-    if (!existingVault) {
-      this.openWaiterVault(customFloat, emp);
-    } else {
+    if (existingVault) {
       this.activeVaultSession.set(existingVault);
+    } else {
+      // Only open if there really is no open vault
+      this.openWaiterVault(customFloat, emp);
     }
   }
 
