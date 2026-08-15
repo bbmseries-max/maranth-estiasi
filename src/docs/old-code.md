@@ -143,3 +143,89 @@ export interface Employee {
     this.tableOrderService.addOrderItemToTable(tableId, product, modifiers, notes, waiter);
     this.inventoryService.deductRecipeIngredients(product, 1);
   }
+
+    public async settleTablePayment(
+    tableId: string, 
+    paymentMethod: 'CASH' | 'CARD' | 'DEBT',
+    targetWaiterVaultId?: string
+  ): Promise<void> {
+    const currentEmp = this.currentEmployee();
+
+    // ⛔ GUARD 1: Block ghost users with no active session
+    if (!currentEmp) {
+      alert('⚠️ Δεν υπάρχει συνδεδεμένος χρήστης. Παρακαλώ συνδεθείτε με το PIN σας.');
+      this.logoutEmployee();
+      return;
+    }
+
+    const table = this.tables().find(t => t.id === tableId);
+    const activeOrder = table?.activeOrder;
+
+    // ⛔ GUARD 2: Kitchen Unsent Items Check
+    if (activeOrder && activeOrder.items) {
+      const unsentItems = activeOrder.items.filter(item => item.status === 'PENDING');
+      if (unsentItems.length > 0) {
+        alert(
+          `⚠️ Υπάρχουν ${unsentItems.length} προϊόντα που δεν έχουν σταλεί στην κουζίνα!\n\nΠαρακαλώ πατήστε "Αποστολή" στην κουζίνα πριν την εξόφληση.`
+        );
+        return;
+      }
+    }
+
+    // ⛔ GUARD 3: Must have an active open vault (NO SILENT PHANTOM VAULTS)
+    const activeVaults = this.activeVaultSessions();
+    let targetVault: WaiterVaultSession | null | undefined = targetWaiterVaultId 
+      ? activeVaults.find(v => v.id === targetWaiterVaultId && v.status === 'OPEN')
+      : activeVaults.find(v => v.waiterId === currentEmp.id && v.status === 'OPEN')
+        || activeVaults.find(v => v.waiterName === currentEmp.name && v.status === 'OPEN')
+        || this.activeVaultSession();
+
+    if (!targetVault && activeVaults.length > 0) {
+      targetVault = activeVaults[0];
+    }
+
+    if (!targetVault) {
+      alert('⚠️ Δεν βρέθηκε ενεργό ανοιχτό ταμείο για την καταχώρηση της είσπραξης. Παρακαλώ ανοίξτε ταμείο/βάρδια.');
+      return;
+    }
+
+    // Deduct stock for settled items
+    if (activeOrder && activeOrder.items) {
+      activeOrder.items.forEach(orderItem => {
+        const matchingProd = this.products().find(p => p.id === orderItem.productId);
+        if (matchingProd) {
+          this.deductRecipeIngredients(matchingProd, orderItem.quantity);
+        }
+      });
+    }
+    
+    return this.tableOrderService.settleTablePayment(tableId, paymentMethod, currentEmp, (sale) => {
+      const addedCash = paymentMethod === 'CASH' ? (sale.grandTotal || 0) : 0;
+      const addedCard = paymentMethod === 'CARD' ? (sale.grandTotal || 0) : 0;
+
+      const updatedVault: WaiterVaultSession = {
+        ...targetVault!,
+        cashCollected: Number(((targetVault!.cashCollected || 0) + addedCash).toFixed(2)),
+        cardCollected: Number(((targetVault!.cardCollected || 0) + addedCard).toFixed(2))
+      };
+
+      this.allVaultSessions.update(list => list.map(v => v.id === targetVault!.id ? updatedVault : v));
+      this.activeVaultSessions.update(list => list.map(v => v.id === targetVault!.id ? updatedVault : v));
+      
+      if (this.activeVaultSession()?.id === targetVault!.id) {
+        this.activeVaultSession.set(updatedVault);
+      }
+
+      if (this.db) {
+        setDoc(doc(this.db, 'vaults', targetVault!.id), cleanUndefined(updatedVault), { merge: true }).catch(() => {});
+      }
+
+      this.logAudit(
+        'PAYMENT_RECEIVED', 
+        `Εξόφληση €${sale.grandTotal.toFixed(2)} (${paymentMethod}) - Τραπέζι #${sale.tableNumber} [Ταμείο: ${targetVault!.waiterName}]`, 
+        sale.tableNumber
+      );
+    });
+  }
+
+  

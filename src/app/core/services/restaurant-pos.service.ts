@@ -387,12 +387,16 @@ export class RestaurantPosService {
   }
 
   public logoutEmployee(): void {
-    this.authShiftService.logoutEmployee();
+    this.authShiftService.currentEmployee.set(null);
+    this.authShiftService.activeWorkShift.set(null);
     this.activeVaultSession.set(null);
+    
+    // Clear all storage keys to prevent roleGuard from resurrecting the ghost
     localStorage.removeItem('current_employee');
     localStorage.removeItem('maranth_pos_employee');
-  }
 
+    this.router.navigate(['/login'], { replaceUrl: true });
+  }
   public clockInShift(notes?: string): void {
     this.authShiftService.clockInShift(notes);
   }
@@ -595,26 +599,52 @@ export class RestaurantPosService {
     return this.tableOrderService.markTableBillPrinted(tableId);
   }
 
-  public async settleTablePayment(
+ public async settleTablePayment(
     tableId: string, 
     paymentMethod: 'CASH' | 'CARD' | 'DEBT',
     targetWaiterVaultId?: string
   ): Promise<void> {
+    const currentEmp = this.currentEmployee();
+
+    // ⛔ GUARD 1: Block ghost users with no active session
+    if (!currentEmp) {
+      alert('⚠️ Δεν υπάρχει συνδεδεμένος χρήστης. Παρακαλώ συνδεθείτε με το PIN σας.');
+      this.logoutEmployee();
+      return;
+    }
+
     const table = this.tables().find(t => t.id === tableId);
     const activeOrder = table?.activeOrder;
 
+    // ⛔ GUARD 2: Kitchen Unsent Items Check
     if (activeOrder && activeOrder.items) {
       const unsentItems = activeOrder.items.filter(item => item.status === 'PENDING');
       if (unsentItems.length > 0) {
         alert(
-          `⚠️ Υπάρχουν ${unsentItems.length} εκκρεμή προϊόντα που δεν έχουν σταλεί στην κουζίνα!\n\nΠαρακαλώ πατήστε "Αποστολή" στην κουζίνα πριν την εξόφληση.`
+          `⚠️ Υπάρχουν ${unsentItems.length} προϊόντα που δεν έχουν σταλεί στην κουζίνα!\n\nΠαρακαλώ πατήστε "Αποστολή" στην κουζίνα πριν την εξόφληση.`
         );
         return;
       }
     }
 
-    const currentEmp = this.currentEmployee();
+    // ⛔ GUARD 3: Must have an active open vault (NO SILENT PHANTOM VAULTS)
+    const activeVaults = this.activeVaultSessions();
+    let targetVault: WaiterVaultSession | null | undefined = targetWaiterVaultId 
+      ? activeVaults.find(v => v.id === targetWaiterVaultId && v.status === 'OPEN')
+      : activeVaults.find(v => v.waiterId === currentEmp.id && v.status === 'OPEN')
+        || activeVaults.find(v => v.waiterName === currentEmp.name && v.status === 'OPEN')
+        || this.activeVaultSession();
 
+    if (!targetVault && activeVaults.length > 0) {
+      targetVault = activeVaults[0];
+    }
+
+    if (!targetVault) {
+      alert('⚠️ Δεν βρέθηκε ενεργό ανοιχτό ταμείο για την καταχώρηση της είσπραξης. Παρακαλώ ανοίξτε ταμείο/βάρδια.');
+      return;
+    }
+
+    // Deduct stock for settled items
     if (activeOrder && activeOrder.items) {
       activeOrder.items.forEach(orderItem => {
         const matchingProd = this.products().find(p => p.id === orderItem.productId);
@@ -625,42 +655,29 @@ export class RestaurantPosService {
     }
     
     return this.tableOrderService.settleTablePayment(tableId, paymentMethod, currentEmp, (sale) => {
-      const activeVaults = this.activeVaultSessions();
-      
-      let targetVault: WaiterVaultSession | null | undefined = targetWaiterVaultId 
-        ? activeVaults.find(v => v.id === targetWaiterVaultId && v.status === 'OPEN')
-        : activeVaults.find(v => v.waiterId === sale.waiterId && v.status === 'OPEN') 
-          || activeVaults.find(v => v.waiterId === currentEmp?.id && v.status === 'OPEN')
-          || activeVaults.find(v => v.waiterName === currentEmp?.name && v.status === 'OPEN')
-          || activeVaults[0];
+      const addedCash = paymentMethod === 'CASH' ? (sale.grandTotal || 0) : 0;
+      const addedCard = paymentMethod === 'CARD' ? (sale.grandTotal || 0) : 0;
 
-      if (!targetVault && currentEmp) {
-        this.openWaiterVault(0, currentEmp);
-        targetVault = this.activeVaultSession();
+      const updatedVault: WaiterVaultSession = {
+        ...targetVault!,
+        cashCollected: Number(((targetVault!.cashCollected || 0) + addedCash).toFixed(2)),
+        cardCollected: Number(((targetVault!.cardCollected || 0) + addedCard).toFixed(2))
+      };
+
+      this.allVaultSessions.update(list => list.map(v => v.id === targetVault!.id ? updatedVault : v));
+      this.activeVaultSessions.update(list => list.map(v => v.id === targetVault!.id ? updatedVault : v));
+      
+      if (this.activeVaultSession()?.id === targetVault!.id) {
+        this.activeVaultSession.set(updatedVault);
       }
 
-      if (targetVault) {
-        const addedCash = paymentMethod === 'CASH' ? (sale.grandTotal || 0) : 0;
-        const addedCard = paymentMethod === 'CARD' ? (sale.grandTotal || 0) : 0;
-
-        const updatedVault: WaiterVaultSession = {
-          ...targetVault,
-          cashCollected: Number(((targetVault.cashCollected || 0) + addedCash).toFixed(2)),
-          cardCollected: Number(((targetVault.cardCollected || 0) + addedCard).toFixed(2))
-        };
-
-        this.allVaultSessions.update(list => list.map(v => v.id === targetVault!.id ? updatedVault : v));
-        this.activeVaultSessions.update(list => list.map(v => v.id === targetVault!.id ? updatedVault : v));
-        this.activeVaultSession.set(updatedVault);
-
-        if (this.db) {
-          setDoc(doc(this.db, 'vaults', targetVault.id), cleanUndefined(updatedVault), { merge: true }).catch(() => {});
-        }
+      if (this.db) {
+        setDoc(doc(this.db, 'vaults', targetVault!.id), cleanUndefined(updatedVault), { merge: true }).catch(() => {});
       }
 
       this.logAudit(
         'PAYMENT_RECEIVED', 
-        `Εξόφληση €${sale.grandTotal.toFixed(2)} (${paymentMethod}) - Τραπέζι #${sale.tableNumber} ${targetVault ? '[Ταμείο: ' + targetVault.waiterName + ']' : ''}`, 
+        `Εξόφληση €${sale.grandTotal.toFixed(2)} (${paymentMethod}) - Τραπέζι #${sale.tableNumber} [Ταμείο: ${targetVault!.waiterName}]`, 
         sale.tableNumber
       );
     });
@@ -824,7 +841,7 @@ public async closeWaiterVaultSession(closedSession: WaiterVaultSession): Promise
     const nowStr = new Date().toISOString();
     const currentEmp = this.currentEmployee();
 
-    // 1. Calculate and freeze exact financial figures
+    // 1. Calculate & lock financial figures
     const startFloat = closedSession.startingFloat || 0;
     const cash = closedSession.cashCollected || 0;
     const card = closedSession.cardCollected || 0;
@@ -841,16 +858,15 @@ public async closeWaiterVaultSession(closedSession: WaiterVaultSession): Promise
       cashVariance: variance
     };
 
-    // 2. Archive locally in allVaultSessions (never delete from memory)
+    // 2. Update local state (keep in allVaultSessions so history/totals are preserved)
     this.activeVaultSessions.update(list => list.filter(v => v.id !== closedSession.id));
     this.allVaultSessions.update(list => list.map(v => v.id === closedSession.id ? finalizedVault : v));
     
-    const myCurrentVault = this.activeVaultSession();
-    if (myCurrentVault && myCurrentVault.id === closedSession.id) {
+    if (this.activeVaultSession()?.id === closedSession.id) {
       this.activeVaultSession.set(null);
     }
 
-    // 3. Persist closed vault snapshot to Firestore
+    // 3. Persist to Firestore
     if (this.db && closedSession.id) {
       try {
         await setDoc(doc(this.db, 'vaults', closedSession.id), cleanUndefined(finalizedVault), { merge: true });
@@ -859,7 +875,7 @@ public async closeWaiterVaultSession(closedSession: WaiterVaultSession): Promise
       }
     }
 
-    // 4. Save the full financial payload directly into the Shift document
+    // 4. Save full financial summary directly to shift document
     const targetEmpId = closedSession.waiterId || closedSession.waiterName;
     await this.authShiftService.clockOutEmployeeShift(
       targetEmpId, 
@@ -877,11 +893,16 @@ public async closeWaiterVaultSession(closedSession: WaiterVaultSession): Promise
 
     this.logAudit(
       'VAULT_CLOSED',
-      `Κλείσιμο ταμείου (${closedSession.waiterName}): Εισπράξεις €${cash.toFixed(2)} Μετρητά, €${card.toFixed(2)} Κάρτες. Παράδοση: €${handedOver.toFixed(2)}`
+      `Κλείσιμο ταμείου (${closedSession.waiterName}): Μετρητά €${cash.toFixed(2)}, Κάρτες €${card.toFixed(2)}. Παράδοση: €${handedOver.toFixed(2)}`
     );
 
-    // 5. If the logged-in user just closed their own vault, log them out to reset the terminal
-    if (currentEmp && (currentEmp.id === targetEmpId || currentEmp.name === targetEmpId)) {
+    // 5. HARD LOGOUT: If the currently logged-in user closed their shift/vault, kick them to login
+    const targetEmpKey = String(targetEmpId).trim().toLowerCase();
+    const currentEmpId = String(currentEmp?.id || '').trim().toLowerCase();
+    const currentEmpName = String(currentEmp?.name || '').trim().toLowerCase();
+    const currentEmpPin = String(currentEmp?.pin || currentEmp?.pinCode || '').trim().toLowerCase();
+
+    if (currentEmp && (currentEmpId === targetEmpKey || currentEmpName === targetEmpKey || currentEmpPin === targetEmpKey)) {
       this.logoutEmployee();
     }
   }
