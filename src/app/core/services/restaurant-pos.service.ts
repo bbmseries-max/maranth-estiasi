@@ -807,51 +807,57 @@ export class RestaurantPosService {
   // In src/app/core/services/restaurant-pos.service.ts
 
 public async closeWaiterVaultSession(closedSession: WaiterVaultSession): Promise<void> {
-  const nowStr = new Date().toISOString();
-  const currentEmp = this.currentEmployee();
+    const nowStr = new Date().toISOString();
+    const currentEmp = this.currentEmployee();
 
-  const finalizedVault: WaiterVaultSession = {
-    ...closedSession,
-    status: 'CLOSED',
-    closedAt: nowStr
-  };
+    // 1. Lock in the financial totals so money is NEVER zeroed out
+    const expected = Number(((closedSession.startingFloat || 0) + (closedSession.cashCollected || 0)).toFixed(2));
+    const handedOver = closedSession.cashHandedOver ?? expected;
+    const variance = Number((handedOver - expected).toFixed(2));
 
-  // 1. Update lists without touching other open vaults
-  this.activeVaultSessions.update(list => list.filter(v => v.id !== closedSession.id));
-  this.allVaultSessions.update(list => list.map(v => v.id === closedSession.id ? finalizedVault : v));
-  
-  // 2. Only nullify the active vault signal IF the closed vault belongs to the logged-in user
-  const myCurrentVault = this.activeVaultSession();
-  if (myCurrentVault && myCurrentVault.id === closedSession.id) {
-    this.activeVaultSession.set(null);
-  }
+    const finalizedVault: WaiterVaultSession = {
+      ...closedSession,
+      status: 'CLOSED',
+      closedAt: nowStr,
+      expectedCash: expected,
+      cashHandedOver: handedOver,
+      cashVariance: variance
+    };
 
-  // 3. Persist specific vault closure to Firestore
-  if (this.db && closedSession.id) {
-    try {
-      await setDoc(doc(this.db, 'vaults', closedSession.id), cleanUndefined(finalizedVault), { merge: true });
-    } catch (err) {
-      console.error('Error saving closed vault to Firestore:', err);
+    // 2. Update memory state (Preserve in allVaultSessions for reports and daily totals)
+    this.activeVaultSessions.update(list => list.filter(v => v.id !== closedSession.id));
+    this.allVaultSessions.update(list => list.map(v => v.id === closedSession.id ? finalizedVault : v));
+    
+    const myCurrentVault = this.activeVaultSession();
+    if (myCurrentVault && myCurrentVault.id === closedSession.id) {
+      this.activeVaultSession.set(null);
     }
+
+    // 3. Persist closed vault with complete figures to Firestore
+    if (this.db && closedSession.id) {
+      try {
+        await setDoc(doc(this.db, 'vaults', closedSession.id), cleanUndefined(finalizedVault), { merge: true });
+      } catch (err) {
+        console.error('Error saving closed vault to Firestore:', err);
+      }
+    }
+
+    // 4. Save vault totals directly into the shift log
+    const targetEmpId = closedSession.waiterId || closedSession.waiterName;
+    await this.authShiftService.clockOutEmployeeShift(
+      targetEmpId, 
+      `Κλείσιμο ταμείου: Μετρητά €${(closedSession.cashCollected || 0).toFixed(2)}, Κάρτες €${(closedSession.cardCollected || 0).toFixed(2)}, Παράδοση €${handedOver.toFixed(2)}`
+    );
+
+    if (currentEmp && (currentEmp.id === targetEmpId || currentEmp.name === targetEmpId)) {
+      this.authShiftService.activeWorkShift.set(null);
+    }
+
+    this.logAudit(
+      'VAULT_CLOSED',
+      `Κλείσιμο ταμείου (${closedSession.waiterName}): Εισπράξεις €${(closedSession.cashCollected || 0).toFixed(2)} Μετρητά, €${(closedSession.cardCollected || 0).toFixed(2)} Κάρτες. Παράδοση: €${handedOver.toFixed(2)}`
+    );
   }
-
-  // 4. Clock out ONLY the target employee (by their unique ID)
-  const targetEmpId = closedSession.waiterId || closedSession.waiterName;
-  await this.authShiftService.clockOutEmployeeShift(
-    targetEmpId, 
-    `Κλείσιμο ταμείου (${closedSession.waiterName})`
-  );
-
-  // 5. Only reset activeWorkShift if the logged-in user is the one who was clocked out
-  if (currentEmp && (currentEmp.id === targetEmpId || currentEmp.name === targetEmpId)) {
-    this.authShiftService.activeWorkShift.set(null);
-  }
-
-  this.logAudit(
-    'VAULT_CLOSED',
-    `Κλείσιμο ταμείου & βάρδιας: ${closedSession.waiterName}. Μετρητά: €${(closedSession.cashHandedOver || 0).toFixed(2)}`
-  );
-}
 
 public closeDayAndGenerateZReport(): DailyZReportSnapshot {
   const emp = this.currentEmployee();
