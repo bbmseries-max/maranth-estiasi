@@ -1,8 +1,7 @@
-import { Component, inject, signal, computed, Input, Output, EventEmitter } from '@angular/core';
+import { Component, signal, computed, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RestaurantPosService } from '../../../../core/services/restaurant-pos.service';
-import { WaiterVaultSession } from '../../../../core/modals/restaurant-pos.modals'; 
+import { WaiterVaultSession } from '../../../../core/modals/restaurant-pos.modals';
 
 @Component({
   selector: 'app-vault-closure-modal',
@@ -16,7 +15,7 @@ import { WaiterVaultSession } from '../../../../core/modals/restaurant-pos.modal
         <div class="flex justify-between items-center border-b border-slate-800 pb-3">
           <div>
             <h3 class="text-lg font-black text-white m-0">🔒 Κλείσιμο Ταμείου & Βάρδιας</h3>
-            <span class="text-xs text-amber-400 font-bold">{{ vault.waiterName }}</span>
+            <span class="text-xs text-amber-400 font-bold">{{ vault().waiterName || 'Σερβιτόρος' }}</span>
           </div>
           <button (click)="cancel.emit()" class="text-slate-400 hover:text-white text-xl cursor-pointer">✕</button>
         </div>
@@ -25,15 +24,21 @@ import { WaiterVaultSession } from '../../../../core/modals/restaurant-pos.modal
         <div class="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col gap-2">
           <div class="flex justify-between text-xs">
             <span class="text-slate-400">Έναρξη Ταμείου:</span>
-            <span class="text-xs font-black text-slate-300">€{{ (vault.startingCash || 0).toFixed(2) }}</span>
+            <span class="text-xs font-black text-slate-300">
+              €{{ (vault().startingFloat || 0).toFixed(2) }}
+            </span>
           </div>
           <div class="flex justify-between text-xs">
             <span class="text-slate-400">Πωλήσεις Μετρητά:</span>
-            <span class="font-bold text-emerald-400">+€{{ (vault.cashCollected || 0).toFixed(2) }}</span>
+            <span class="font-bold text-emerald-400">
+              +€{{ (vault().cashCollected || 0).toFixed(2) }}
+            </span>
           </div>
           <div class="flex justify-between text-xs">
             <span class="text-slate-400">Πωλήσεις Κάρτας:</span>
-            <span class="font-bold text-sky-400">€{{ (vault.cardCollected || 0).toFixed(2) }}</span>
+            <span class="font-bold text-sky-400">
+              €{{ (vault().cardCollected || 0).toFixed(2) }}
+            </span>
           </div>
           <div class="pt-2 border-t border-slate-800 flex justify-between text-sm">
             <span class="font-black text-slate-300">Αναμενόμενα Μετρητά Συρταριού:</span>
@@ -44,7 +49,7 @@ import { WaiterVaultSession } from '../../../../core/modals/restaurant-pos.modal
         <!-- Cash Count Input -->
         <div class="flex flex-col gap-1.5">
           <label class="text-xs font-black text-slate-300">💵 Καταμέτρηση Μετρητών Συρταριού (€)</label>
-          <input type="number" step="0.01" 
+          <input type="number" step="0.01" min="0"
                  [ngModel]="countedCash()" (ngModelChange)="countedCash.set($event)"
                  placeholder="Εισάγετε πραγματικό ποσό..."
                  class="w-full bg-slate-950 border border-slate-700 rounded-2xl p-3.5 text-lg font-black text-emerald-400 focus:outline-none focus:border-amber-400 transition-all">
@@ -54,7 +59,9 @@ import { WaiterVaultSession } from '../../../../core/modals/restaurant-pos.modal
         @if (countedCash() !== null && countedCash() !== undefined) {
           <div class="p-3 rounded-2xl flex justify-between items-center text-xs font-bold"
                [ngClass]="discrepancy() === 0 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : discrepancy() < 0 ? 'bg-red-500/20 text-red-300 border border-red-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'">
-            <span>{{ discrepancy() === 0 ? '✅ Ταμείο Ισοσκελισμένο' : discrepancy() < 0 ? '❌ Έλλειμμα Ταμείου:' : '⚠️ Πλεόνασμα Ταμείου:' }}</span>
+            <span>
+              {{ discrepancy() === 0 ? '✅ Ταμείο Ισοσκελισμένο' : discrepancy() < 0 ? '❌ Έλλειμμα Ταμείου:' : '⚠️ Πλεόνασμα Ταμείου:' }}
+            </span>
             <span class="font-black text-sm">€{{ discrepancy().toFixed(2) }}</span>
           </div>
         }
@@ -66,7 +73,7 @@ import { WaiterVaultSession } from '../../../../core/modals/restaurant-pos.modal
             Ακύρωση
           </button>
           <button (click)="closeShift()" 
-                  [disabled]="countedCash() === null || countedCash() === undefined"
+                  [disabled]="countedCash() === null || countedCash() === undefined || countedCash()! < 0"
                   class="flex-1 py-3.5 rounded-2xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-black text-xs shadow-lg transition-all cursor-pointer">
             Οριστικό Κλείσιμο
           </button>
@@ -77,15 +84,20 @@ import { WaiterVaultSession } from '../../../../core/modals/restaurant-pos.modal
   `
 })
 export class VaultClosureModalComponent {
-  @Input({ required: true }) vault!: WaiterVaultSession;
-  @Output() cancel = new EventEmitter<void>();
-  @Output() completeShiftClose = new EventEmitter<{ vaultId: string; countedCash: number; discrepancy: number }>();
+  // Signal input: guarantees expectedCash computed reacts immediately to parent changes
+  public vault = input.required<WaiterVaultSession>();
+  
+  public cancel = output<void>();
+  public completeShiftClose = output<{ vaultId: string; countedCash: number; discrepancy: number }>();
 
   public countedCash = signal<number | null>(null);
 
   public expectedCash = computed(() => {
-    if (!this.vault) return 0;
-    return (this.vault.startingCash || 0) + (this.vault.cashCollected || 0);
+    const currentVault = this.vault();
+    if (!currentVault) return 0;
+    const starting = currentVault.startingFloat || 0;
+    const collected = currentVault.cashCollected || 0;
+    return Number((starting + collected).toFixed(2));
   });
 
   public discrepancy = computed(() => {
@@ -99,7 +111,7 @@ export class VaultClosureModalComponent {
     if (counted === null || counted === undefined) return;
 
     this.completeShiftClose.emit({
-      vaultId: this.vault.id,
+      vaultId: this.vault().id,
       countedCash: counted,
       discrepancy: this.discrepancy()
     });

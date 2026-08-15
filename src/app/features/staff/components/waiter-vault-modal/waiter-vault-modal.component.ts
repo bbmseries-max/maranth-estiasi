@@ -1,8 +1,7 @@
-import { Component, Input, Output, EventEmitter, signal, computed, inject } from '@angular/core';
+import { Component, input, output, signal, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
-// 🎯 Adjusted relative paths to point to core
 import { RestaurantPosService } from '../../../../core/services/restaurant-pos.service';
 import { WaiterVaultSession } from '../../../../core/modals/restaurant-pos.modals';
 import { ThermalPrinterService } from '../../../../core/services/thermal-printer.service';
@@ -15,23 +14,28 @@ import { ThermalPrinterService } from '../../../../core/services/thermal-printer
   styleUrls: ['./waiter-vault-modal.component.scss']
 })
 export class WaiterVaultModalComponent {
-  // ... rest of component code remains the same
-private posService = inject(RestaurantPosService);
-private printerService = inject(ThermalPrinterService);
+  private posService = inject(RestaurantPosService);
+  private printerService = inject(ThermalPrinterService);
 
-  @Input() session: WaiterVaultSession | null = null;
-  @Input() isOpen = false;
-  @Output() closeModal = new EventEmitter<void>();
-  @Output() vaultClosed = new EventEmitter<WaiterVaultSession>();
+  // Modern Signal Inputs (Template binding [session]="..." and [isOpen]="..." stays identical)
+  public session = input<WaiterVaultSession | null>(null);
+  public isOpen = input<boolean>(false);
+
+  // Modern Outputs
+  public closeModal = output<void>();
+  public vaultClosed = output<WaiterVaultSession>();
 
   // State Signals
   public cashHandedOver = signal<number | null>(null);
   public notes = signal<string>('');
 
-  // Computations
+  // Computations (Now fully reactive to session changes!)
   public expectedCash = computed(() => {
-    if (!this.session) return 0;
-    return (this.session.startingFloat || 0) + (this.session.cashCollected || 0);
+    const currentSession = this.session();
+    if (!currentSession) return 0;
+    const starting = currentSession.startingFloat || 0;
+    const collected = currentSession.cashCollected || 0;
+    return Number((starting + collected).toFixed(2));
   });
 
   public variance = computed(() => {
@@ -48,28 +52,43 @@ private printerService = inject(ThermalPrinterService);
     this.cashHandedOver.set(null);
   }
 
-  public submitVaultClosure(): void {
-  if (!this.session) return;
+  public async submitVaultClosure(): Promise<void> {
+    const currentSession = this.session();
+    if (!currentSession) return;
 
-  const actualCash = this.cashHandedOver() ?? 0;
-  const closedSession: WaiterVaultSession = {
-    ...this.session,
-    closedAt: new Date().toISOString(),
-    expectedCash: this.expectedCash(),
-    cashHandedOver: actualCash,
-    cashVariance: this.variance(),
-    notes: this.notes().trim(),
-    status: 'CLOSED'
-  };
+    const actualCash = this.cashHandedOver() ?? 0;
+    const expected = this.expectedCash();
+    const varAmount = Number((actualCash - expected).toFixed(2));
 
-  // 1. Trigger Thermal Printer
-  this.printerService.printVaultReceipt(closedSession, actualCash);
+    const closedSession: WaiterVaultSession = {
+      ...currentSession,
+      closedAt: new Date().toISOString(),
+      expectedCash: expected,
+      cashHandedOver: actualCash,
+      cashVariance: varAmount,
+      notes: this.notes().trim(),
+      status: 'CLOSED'
+    };
 
-  // 2. Save Session & Emit Event
-  this.posService.closeWaiterVaultSession(closedSession);
-  this.vaultClosed.emit(closedSession);
-  this.onClose();
-}
+    // 1. Safe Printer Trigger (Doesn't block close if printer is offline)
+    try {
+      if (this.printerService && typeof this.printerService.printVaultReceipt === 'function') {
+        this.printerService.printVaultReceipt(closedSession, actualCash);
+      }
+    } catch (err) {
+      console.warn('Printer offline or receipt print failed:', err);
+    }
+
+    // 2. Persist to Firestore once & emit notification to parent
+    try {
+      await this.posService.closeWaiterVaultSession(closedSession);
+    } catch (err) {
+      console.error('Error closing vault session:', err);
+    }
+
+    this.vaultClosed.emit(closedSession);
+    this.onClose();
+  }
 
   public onClose(): void {
     this.cashHandedOver.set(null);

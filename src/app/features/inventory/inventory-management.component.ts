@@ -201,6 +201,16 @@ export class InventoryManagementComponent {
     }
   }
 
+  private getInitialTab(): 'RECEIVING' | 'STOCK' | 'TABLES' | 'STAFF' | 'SPOILAGE' {
+    const saved = sessionStorage.getItem('inv_active_tab') as any;
+    return ['RECEIVING', 'STOCK', 'TABLES', 'STAFF', 'SPOILAGE'].includes(saved) ? saved : 'RECEIVING';
+  }
+
+  public setTab(tab: 'RECEIVING' | 'STOCK' | 'TABLES' | 'STAFF' | 'SPOILAGE'): void {
+    this.activeTab.set(tab);
+    sessionStorage.setItem('inv_active_tab', tab);
+  }
+
   public openNewTableModal(): void {
     this.editingTableId.set(null);
     this.tableNumberInput = (this.posService.tables().length || 0) + 1;

@@ -1,6 +1,5 @@
  <div class="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
       
-      <!-- TOP NAVIGATION BAR -->
      <!-- TOP NAVIGATION BAR -->
       <header class="bg-slate-900 border-b border-slate-800 px-4 py-3 flex flex-wrap items-center justify-between gap-4 shadow-lg sticky top-0 z-30 min-h-[4rem]">
         
@@ -18,31 +17,31 @@
 
         <!-- TAB SELECTOR BUTTONS (Full width line on mobile, right-aligned on desktop) -->
         <div class="flex items-center gap-2 overflow-x-auto hide-scrollbar w-full md:w-auto md:flex-1 md:justify-end order-last md:order-none pb-1 md:pb-0">
-          <button (click)="activeTab.set('RECEIVING')"
-                  class="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
-                  [ngClass]="activeTab() === 'RECEIVING' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
-            📥 Παραλαβή
-          </button>
-          <button (click)="activeTab.set('STOCK')"
-                  class="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
-                  [ngClass]="activeTab() === 'STOCK' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
-            🏷️ Τιμοκατάλογος
-          </button>
-          <button (click)="activeTab.set('TABLES')"
-                  class="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
-                  [ngClass]="activeTab() === 'TABLES' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
-            🪑 Τραπέζια
-          </button>
-          <button (click)="activeTab.set('STAFF')"
-                  class="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
-                  [ngClass]="activeTab() === 'STAFF' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
-            👥 Προσωπικό
-          </button>
-          <button (click)="activeTab.set('SPOILAGE')"
-                  class="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
-                  [ngClass]="activeTab() === 'SPOILAGE' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
-            🗑️ Φύρα
-          </button>
+          <button (click)="setTab('RECEIVING')"
+        class="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
+        [ngClass]="activeTab() === 'RECEIVING' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+  📥 Παραλαβή
+</button>
+<button (click)="setTab('STOCK')"
+        class="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
+        [ngClass]="activeTab() === 'STOCK' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+  🏷️ Τιμοκατάλογος
+</button>
+<button (click)="setTab('TABLES')"
+        class="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
+        [ngClass]="activeTab() === 'TABLES' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+  🪑 Τραπέζια
+</button>
+<button (click)="setTab('STAFF')"
+        class="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
+        [ngClass]="activeTab() === 'STAFF' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+  👥 Προσωπικό
+</button>
+<button (click)="setTab('SPOILAGE')"
+        class="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
+        [ngClass]="activeTab() === 'SPOILAGE' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+  🗑️ Φύρα
+</button>
         </div>
       </header>
       <div class="flex-1 p-4 md:p-6 overflow-y-auto max-w-7xl mx-auto w-full">
@@ -237,7 +236,7 @@
                     <tr class="border-b border-slate-800/60 hover:bg-slate-800/40 transition-colors">
                       <td class="py-3 px-3 font-bold text-white">{{ prod.name }}</td>
                       <td class="py-3 px-3 text-slate-400 font-medium">{{ prod.categoryName || 'Γενικά' }}</td>
-                      <td class="py-3 px-3 font-black text-emerald-400">€{{ prod.price.toFixed(2) }}</td>
+                      <td class="py-3 px-3 font-black text-emerald-400">€{{ (prod.price || 0).toFixed(2) }}</td>
                       <td class="py-3 px-3 text-slate-300 font-bold">€{{ (prod.purchasePrice || prod.costPrice || 0).toFixed(2) }}</td>
                       <td class="py-3 px-3 font-bold text-amber-400">{{ prod.taxRate || 13 }}%</td>
                       <td class="py-3 px-3">
@@ -851,44 +850,50 @@
         </div>
       }
 
-      <!-- MODAL 7: RAW MATERIAL DIRECT STOCK ADJUSTMENT (ΑΠΟΓΡΑΦΗ) -->
-      @if (adjustingRawMaterial(); as mat) {
-        <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div class="bg-slate-800 border border-slate-700 rounded-3xl p-6 w-full max-w-md shadow-2xl flex flex-col gap-4">
-            <div class="flex justify-between items-center border-b border-slate-700 pb-3">
-              <h3 class="text-lg font-black text-white m-0">⚖️ Απογραφή: {{ mat.name }}</h3>
-              <button (click)="adjustingRawMaterial.set(null)" class="text-slate-400 hover:text-white text-xl cursor-pointer">✕</button>
-            </div>
+ <!-- MODAL 7: RAW MATERIAL DIRECT STOCK ADJUSTMENT (ΑΠΟΓΡΑΦΗ) -->
+@if (adjustingRawMaterial(); as mat) {
+  <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-800 border border-slate-700 rounded-3xl p-6 w-full max-w-md shadow-2xl flex flex-col gap-4">
+      <div class="flex justify-between items-center border-b border-slate-700 pb-3">
+        <h3 class="text-lg font-black text-white m-0">⚖️ Απογραφή: {{ mat.name }}</h3>
+        <button (click)="adjustingRawMaterial.set(null)" class="text-slate-400 hover:text-white text-xl cursor-pointer">✕</button>
+      </div>
 
-            <div class="bg-slate-900 border border-slate-700 p-3 rounded-2xl flex justify-between items-center text-xs">
-              <span class="text-slate-400 font-bold">Τρέχον Καταγεγραμμένο Υπόλοιπο:</span>
-              <span class="font-black text-amber-400 text-sm">{{ mat.currentStock.toFixed(2) }} {{ mat.unit }}</span>
-            </div>
+      <div class="bg-slate-900 border border-slate-700 p-3 rounded-2xl flex justify-between items-center text-xs">
+        <span class="text-slate-400 font-bold">Τρέχον Καταγεγραμμένο Υπόλοιπο:</span>
+        <span class="font-black text-amber-400 text-sm">
+          {{ (mat.currentStock || 0).toFixed(2) }} {{ mat.unit || 'KG' }}
+        </span>
+      </div>
 
-            <div class="flex flex-col gap-3">
-              <div class="flex flex-col gap-1">
-                <label class="text-[11px] font-bold text-slate-400 uppercase">Νέο Καταμετρημένο Απόθεμα ({{ mat.unit }})</label>
-                <input type="number" step="0.1" [(ngModel)]="adjustNewStockCount"
-                       class="bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-3 text-lg font-black text-emerald-400 focus:outline-none focus:border-amber-400" />
-              </div>
-
-              <div class="flex flex-col gap-1">
-                <label class="text-[11px] font-bold text-slate-400 uppercase">Αιτιολογία Απογραφής / Διόρθωσης</label>
-                <input type="text" [(ngModel)]="adjustReasonInput" placeholder="π.χ. Τακτική καταμέτρηση τέλους μήνα"
-                       class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400" />
-              </div>
-            </div>
-
-            <div class="flex gap-2 pt-2 border-t border-slate-700">
-              <button (click)="adjustingRawMaterial.set(null)" class="flex-1 py-3 rounded-xl bg-slate-700 hover:bg-slate-600 font-bold text-slate-200 text-xs cursor-pointer">
-                Ακύρωση
-              </button>
-              <button (click)="confirmStockAdjustment()" class="flex-1 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 font-black text-slate-950 text-xs shadow-md cursor-pointer">
-                ✓ Ενημέρωση Απογραφής
-              </button>
-            </div>
-          </div>
+      <div class="flex flex-col gap-3">
+        <div class="flex flex-col gap-1">
+          <label class="text-[11px] font-bold text-slate-400 uppercase">
+            Νέο Καταμετρημένο Απόθεμα ({{ mat.unit || 'KG' }})
+          </label>
+          <input type="number" step="0.1" min="0" [(ngModel)]="adjustNewStockCount"
+                 class="bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-3 text-lg font-black text-emerald-400 focus:outline-none focus:border-amber-400" />
         </div>
-      }
+
+        <div class="flex flex-col gap-1">
+          <label class="text-[11px] font-bold text-slate-400 uppercase">Αιτιολογία Απογραφής / Διόρθωσης</label>
+          <input type="text" [(ngModel)]="adjustReasonInput" placeholder="π.χ. Τακτική καταμέτρηση τέλους μήνα"
+                 class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400" />
+        </div>
+      </div>
+
+      <div class="flex gap-2 pt-2 border-t border-slate-700">
+        <button (click)="adjustingRawMaterial.set(null)" class="flex-1 py-3 rounded-xl bg-slate-700 hover:bg-slate-600 font-bold text-slate-200 text-xs cursor-pointer">
+          Ακύρωση
+        </button>
+        <button (click)="confirmStockAdjustment()" 
+                [disabled]="adjustNewStockCount === null || adjustNewStockCount === undefined || adjustNewStockCount < 0"
+                class="flex-1 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 font-black text-slate-950 text-xs shadow-md cursor-pointer">
+          ✓ Ενημέρωση Απογραφής
+        </button>
+      </div>
+    </div>
+  </div>
+}
 
     </div>

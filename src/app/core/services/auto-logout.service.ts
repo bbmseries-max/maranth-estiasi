@@ -1,52 +1,64 @@
-import { Injectable, inject, signal, NgZone, OnDestroy } from '@angular/core';
+// src/app/core/services/auto-logout.service.ts
+
+import { Injectable, inject, NgZone, OnDestroy } from '@angular/core';
 import { Router } from '@angular/router';
 import { RestaurantPosService } from './restaurant-pos.service';
+import { AuthShiftService } from './auth-shift.service';
 
 @Injectable({
   providedIn: 'root'
 })
 export class AutoLogoutService implements OnDestroy {
   private posService = inject(RestaurantPosService);
+  private authShiftService = inject(AuthShiftService);
   private router = inject(Router);
   private ngZone = inject(NgZone);
 
-  // Inactivity timeout setting (default: 3 minutes = 180,000 ms)
+  // Inactivity timeout setting: 3 minutes (180,000 ms)
   private readonly IDLE_TIMEOUT_MS = 3 * 60 * 1000;
   
   private timeoutId: any = null;
   private isListening = false;
+  private lastActivityTimestamp = Date.now();
 
-  // Track activity events
+  // Expanded mobile & desktop interaction events
   private readonly activityEvents = [
     'mousemove',
     'mousedown',
     'keydown',
     'touchstart',
+    'touchend',
     'pointerdown',
     'scroll'
   ];
 
-  private readonly boundResetTimer = this.resetTimer.bind(this);
+  private readonly boundResetTimer = this.handleUserActivity.bind(this);
+  private readonly boundVisibilityCheck = this.handleVisibilityChange.bind(this);
 
   /**
-   * Starts monitoring user activity. Call this when the app initializes.
+   * Starts monitoring user activity and mobile lifecycle state.
    */
   public startMonitoring(): void {
     if (this.isListening) return;
     this.isListening = true;
+    this.lastActivityTimestamp = Date.now();
 
-    // Run event listeners OUTSIDE Angular change detection for high performance
     this.ngZone.runOutsideAngular(() => {
+      // 1. Interaction listeners
       this.activityEvents.forEach(event => {
         window.addEventListener(event, this.boundResetTimer, { passive: true });
       });
+
+      // 2. Mobile screen wake / app-switch listener
+      document.addEventListener('visibilitychange', this.boundVisibilityCheck);
+      window.addEventListener('focus', this.boundVisibilityCheck);
     });
 
     this.resetTimer();
   }
 
   /**
-   * Stops monitoring activity (e.g. when already logged out).
+   * Stops monitoring activity.
    */
   public stopMonitoring(): void {
     if (!this.isListening) return;
@@ -60,18 +72,47 @@ export class AutoLogoutService implements OnDestroy {
     this.activityEvents.forEach(event => {
       window.removeEventListener(event, this.boundResetTimer);
     });
+
+    document.removeEventListener('visibilitychange', this.boundVisibilityCheck);
+    window.removeEventListener('focus', this.boundVisibilityCheck);
   }
 
   /**
-   * Resets the inactivity timer whenever user interaction is detected.
+   * Handles user interaction.
+   */
+  private handleUserActivity(): void {
+    this.lastActivityTimestamp = Date.now();
+    this.resetTimer();
+  }
+
+  /**
+   * Evaluates elapsed idle time immediately upon mobile screen unlock or tab focus.
+   */
+  private handleVisibilityChange(): void {
+    if (document.visibilityState === 'visible') {
+      const elapsed = Date.now() - this.lastActivityTimestamp;
+      const currentEmp = this.getCurrentUser();
+
+      if (currentEmp && elapsed >= this.IDLE_TIMEOUT_MS) {
+        this.ngZone.run(() => {
+          this.performAutoLogout('Επαναφορά από αδράνεια / κλείδωμα οθόνης');
+        });
+      } else {
+        this.resetTimer();
+      }
+    }
+  }
+
+  /**
+   * Resets the inactivity timeout countdown.
    */
   public resetTimer(): void {
     if (this.timeoutId) {
       clearTimeout(this.timeoutId);
+      this.timeoutId = null;
     }
 
-    // Do not run timeout logic if no employee is currently logged in
-    const currentEmp = this.posService.currentEmployee();
+    const currentEmp = this.getCurrentUser();
     if (!currentEmp) return;
 
     this.timeoutId = setTimeout(() => {
@@ -82,22 +123,32 @@ export class AutoLogoutService implements OnDestroy {
   }
 
   /**
-   * Performs bulletproof auto-logout and redirects to PIN screen.
+   * Performs absolute logout across all services and navigates to /login.
    */
-  private performAutoLogout(): void {
-    const emp = this.posService.currentEmployee();
+  public performAutoLogout(customReason?: string): void {
+    const emp = this.getCurrentUser();
     if (!emp) return;
 
-    console.warn(`🔒 Auto-logout triggered due to 3 minutes of inactivity for ${emp.name} (${emp.role})`);
+    const reason = customReason || `Αυτόματη αποσύνδεση λόγω αδράνειας (3 λ.) - ${emp.name}`;
+    console.warn(`🔒 ${reason}`);
 
-    // Audit log entry for security audit trail
-    this.posService.logAudit('AUTO_LOGOUT', `Αυτόματη αποσύνδεση λόγω αδράνειας (3 λ.) - ${emp.name}`);
+    // 1. Audit log
+    this.posService.logAudit('AUTO_LOGOUT', reason);
 
-    // Clear active user session (keep active shift/vault intact in DB!)
+    // 2. Clear both service states and local storage keys
+    this.stopMonitoring();
+    this.authShiftService.logoutEmployee();
     this.posService.logoutEmployee();
 
-    // Redirect straight to PIN entry screen
-    this.router.navigate(['/login']);
+    localStorage.removeItem('current_employee');
+    localStorage.removeItem('maranth_pos_employee');
+
+    // 3. Navigate back to PIN login screen
+    this.router.navigate(['/login'], { replaceUrl: true });
+  }
+
+  private getCurrentUser() {
+    return this.authShiftService.currentEmployee() || this.posService.currentEmployee();
   }
 
   ngOnDestroy(): void {

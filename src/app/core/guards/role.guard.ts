@@ -3,55 +3,59 @@
 import { inject } from '@angular/core';
 import { Router, CanActivateFn } from '@angular/router';
 import { RestaurantPosService } from '../services/restaurant-pos.service';
-import { TenantContextService } from '../services/tenant-context.service';
+import { AuthShiftService } from '../services/auth-shift.service';
+import { Employee } from '../modals';
 
 export const roleGuard: CanActivateFn = (route, state) => {
   const posService = inject(RestaurantPosService);
-  const tenantContext = inject(TenantContextService);
+  const authShiftService = inject(AuthShiftService);
   const router = inject(Router);
 
-  // 1. Get employee from signal OR fallback to localStorage
-  let emp = posService.currentEmployee();
+  // 1. Check in-memory signals from either service
+  let emp: Employee | null = authShiftService.currentEmployee() || posService.currentEmployee();
 
+  // 2. Fallback: Restore from localStorage and hydrate signals immediately
   if (!emp) {
     try {
       const savedEmp = localStorage.getItem('current_employee') || localStorage.getItem('maranth_pos_employee');
       if (savedEmp) {
         emp = JSON.parse(savedEmp);
+        if (emp) {
+          authShiftService.currentEmployee.set(emp);
+          posService.currentEmployee.set(emp);
+        }
       }
     } catch (e) {
-      // Ignore parse error
+      console.error('Error parsing stored employee in roleGuard:', e);
+      emp = null;
     }
   }
 
-  // 2. If STILL no user logged in, redirect to PIN login
+  // 3. No active session -> redirect to PIN login
   if (!emp) {
-    console.warn('roleGuard: No active employee session found. Redirecting to /login');
     return router.createUrlTree(['/login']);
   }
 
-  // 3. Extract and normalize role
-  const allowedRoles = (route.data?.['roles'] as string[] | undefined)?.map(r => r.toUpperCase()) || [];
-  let userRole = (emp.role || '').toUpperCase();
-
+  // 4. Normalize employee role
+  let userRole = String(emp.role || '').toUpperCase().trim();
   if (userRole === 'BAR') userRole = 'BARISTA';
   if (userRole === 'CHEF') userRole = 'KITCHEN';
 
-  // 4. Managers, Admins, and Owners get universal access to ALL guarded routes
+  // 5. Admin / Manager / Owner have universal access
   if (['ADMIN', 'MANAGER', 'OWNER'].includes(userRole)) {
     return true;
   }
 
-  // 5. Standard route role validation
+  // 6. Match allowed roles for specific route
+  const allowedRoles = (route.data?.['roles'] as string[] | undefined)?.map(r => r.toUpperCase().trim()) || [];
   if (allowedRoles.length === 0 || allowedRoles.includes(userRole)) {
     return true;
   }
 
-  // 6. Kitchen-only staff redirects to /kitchen (KDS)
+  // 7. Role-based fallback redirection for unauthorized attempts
   if (userRole === 'KITCHEN') {
     return router.createUrlTree(['/kitchen']);
   }
 
-  // 7. Default fallback for floor/counter staff (Waiters, Baristas, Cashiers)
   return router.createUrlTree(['/floor-plan']);
 };

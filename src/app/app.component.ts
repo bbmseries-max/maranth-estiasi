@@ -1,10 +1,9 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule, SlicePipe } from '@angular/common';
-import { MenuService } from './core/services/menu.service';
-import { TenantContextService } from './core/services/tenant-context.service';
+import { WaiterVaultSession } from './core/modals';
 import { MenuSeederService } from './core/services/menu-seeder.service';
 import { AutoLogoutService } from './core/services/auto-logout.service';
-import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
+import { RouterOutlet, RouterLink, RouterLinkActive, Router } from '@angular/router';
 import { RestaurantPosService } from './core/services/restaurant-pos.service';
 import { AuthShiftService } from './core/services/auth-shift.service';
 
@@ -17,18 +16,17 @@ import { AuthShiftService } from './core/services/auth-shift.service';
 export class AppComponent implements OnInit {
   private autoLogoutService = inject(AutoLogoutService);
   private seeder = inject(MenuSeederService);
-  private tenantContext = inject(TenantContextService);
-  private menuService = inject(MenuService);
+  private router = inject(Router);
 
   public posService = inject(RestaurantPosService);
   public authShiftService = inject(AuthShiftService);
   public isBellDrawerOpen = signal<boolean>(false);
 
   async ngOnInit() {
-    // 1. Start bulletproof inactivity monitoring globally
+    // 1. Start inactivity monitoring
     this.autoLogoutService.startMonitoring();
 
-    // 2. 🔒 Only seed if in demo mode, NEVER force override active tenant context
+    // 2. Safe demo seed check (read-only for production tenant)
     this.seeder.checkAndSeedDemoIfNeeded();
   }
 
@@ -73,7 +71,7 @@ export class AppComponent implements OnInit {
     }
   }
 
- public async endMyShift(): Promise<void> {
+  public async endMyShift(): Promise<void> {
     const current = this.authShiftService.currentEmployee();
     if (!current) return;
 
@@ -85,33 +83,55 @@ export class AppComponent implements OnInit {
       // 2. Check if the staff member has an open cash vault drawer
       const activeVaults = this.posService.activeVaultSessions();
       const myOpenVault = activeVaults.find(
-        v => (v.waiterId === current.id || v.waiterId === current.pin || v.waiterName === current.name) && v.status === 'OPEN'
+        v => (
+          v.waiterId === current.id || 
+          v.waiterId === current.pin || 
+          v.waiterName === current.name ||
+          (v.waiterId && current.pin && v.waiterId.includes(current.pin))
+        ) && v.status === 'OPEN'
       );
 
       if (myOpenVault) {
-        const expectedCash = (myOpenVault.startingCash || 0) + (myOpenVault.cashCollected || 0);
+        const startingFloat = myOpenVault.startingFloat || 0;
+        const cashCollected = myOpenVault.cashCollected || 0;
+        const expectedCash = Number((startingFloat + cashCollected).toFixed(2));
+
         const cashHandedStr = prompt(
           `👛 Κλείσιμο Ταμείου (${current.name})\n` +
+          `Αρχικό Ταμείο: €${startingFloat.toFixed(2)}\n` +
+          `Εισπράξεις Μετρητών: €${cashCollected.toFixed(2)}\n` +
           `Αναμενόμενα Μετρητά: €${expectedCash.toFixed(2)}\n\n` +
-          `Εισάγετε το ποσό μετρητών προς παράδοση:`,
+          `Εισάγετε το τελικό ποσό μετρητών προς παράδοση:`,
           expectedCash.toFixed(2)
         );
 
-        if (cashHandedStr !== null) {
-          const cashHanded = parseFloat(cashHandedStr) || 0;
-          await this.posService.closeWaiterVaultSession({
-            ...myOpenVault,
-            cashHandedOver: cashHanded,
-            cashVariance: Number((cashHanded - expectedCash).toFixed(2))
-          });
+        // If employee cancels the prompt, abort the entire shift close
+        if (cashHandedStr === null) {
+          return;
         }
+
+        const cashHanded = parseFloat(cashHandedStr) || 0;
+        const variance = Number((cashHanded - expectedCash).toFixed(2));
+
+        const closedVault: WaiterVaultSession = {
+          ...myOpenVault,
+          closedAt: new Date().toISOString(),
+          expectedCash,
+          cashHandedOver: cashHanded,
+          cashVariance: variance,
+          status: 'CLOSED'
+        };
+
+        await this.posService.closeWaiterVaultSession(closedVault);
       }
 
       // 3. Clock out the employee shift in Firestore & local state
       await this.authShiftService.clockOutEmployeeShift(current.id, `Έξοδος υπαλλήλου (${current.name})`);
 
-      // 4. Log out and return to the PIN login screen
+      // 4. Log out cleanly across both services and return to login
+      this.posService.logoutEmployee();
       this.authShiftService.logoutEmployee();
+      this.router.navigate(['/login'], { replaceUrl: true });
 
     } catch (error) {
       console.error('Error during endMyShift:', error);
