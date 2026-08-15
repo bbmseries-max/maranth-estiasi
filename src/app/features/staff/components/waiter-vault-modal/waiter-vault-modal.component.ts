@@ -1,6 +1,6 @@
 // src/app/features/staff/components/waiter-vault-modal/waiter-vault-modal.component.ts
 
-import { Component, Input, Output, EventEmitter, signal, computed, inject } from '@angular/core';
+import { Component, Input, Output, EventEmitter, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
@@ -20,7 +20,7 @@ export class WaiterVaultModalComponent {
   private printerService = inject(ThermalPrinterService);
 
   @Input() session: WaiterVaultSession | null = null;
-  @Input() isOpen = false;
+  @Input() isOpen: boolean = false;
 
   @Output() closeModal = new EventEmitter<void>();
   @Output() vaultClosed = new EventEmitter<WaiterVaultSession>();
@@ -29,7 +29,7 @@ export class WaiterVaultModalComponent {
   public cashHandedOver = signal<number | null>(null);
   public notes = signal<string>('');
 
-  // Getter computations for reliable recalculation
+  // Getter computations for reliable recalculation in HTML templates
   public get expectedCash(): number {
     if (!this.session) return 0;
     const starting = this.session.startingFloat || 0;
