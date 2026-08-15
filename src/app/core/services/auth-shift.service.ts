@@ -1,6 +1,6 @@
 // src/app/core/services/auth-shift.service.ts
 
-import { Injectable, signal, computed, inject, effect } from '@angular/core';
+import { Injectable, signal, computed, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { 
   Firestore, 
@@ -75,7 +75,6 @@ export class AuthShiftService {
     return role === 'MANAGER' || role === 'ADMIN' || role === 'OWNER';
   });
 
-  // Multi-Store Isolated Shifts List
   public storeShifts = computed(() => {
     const targetTenant = normalizeKey(this.activeTenantId());
     const targetStore = normalizeKey(this.activeStoreId());
@@ -105,38 +104,8 @@ export class AuthShiftService {
     } catch (err) {
       console.warn('Failed to restore employee session:', err);
     }
-
-    let initialCheckComplete = false;
-
-    // Safe Shift Monitor: only triggers auto-logout after real Firestore shifts have arrived
-    effect(() => {
-      const currentEmp = this.currentEmployee();
-      const shifts = this.workShifts();
-      const role = (currentEmp?.role as string)?.toUpperCase() || '';
-
-      if (!currentEmp || role === 'MANAGER' || role === 'ADMIN' || role === 'OWNER') {
-        return;
-      }
-
-      if (shifts.length === 0) {
-        return; // Guard against empty state on initial boot
-      }
-
-      const activeShift = shifts.find(s => 
-        (s.employeeId === currentEmp.id || s.employeeId === currentEmp.pin) && s.status === 'WORKING'
-      );
-
-      if (activeShift) {
-        initialCheckComplete = true;
-      } else if (initialCheckComplete) {
-        this.logoutEmployee();
-      }
-    });
   }
 
-  /**
-   * Default staff seed fallback
-   */
   public getInitialStoreEmployees(tenantId: string, storeId: string): Employee[] {
     return [
       { 
@@ -178,9 +147,6 @@ export class AuthShiftService {
     ];
   }
 
-  /**
-   * Pure Read-Only Firestore Sync
-   */
   public initFirestoreSync(db: Firestore): void {
     this.db = db;
     if (!this.db) return;
@@ -250,7 +216,6 @@ export class AuthShiftService {
   }
 
   // --- AUTHENTICATION METHODS ---
-
   public loginWithPin(pin: string): Employee | null {
     const cleanPin = String(pin).trim();
     const activeTenant = normalizeKey(this.activeTenantId());
@@ -258,7 +223,6 @@ export class AuthShiftService {
 
     const availableEmployees = this.employees();
 
-    // 1. Match PIN with matching store context
     let emp = availableEmployees.find(e => {
       const pinMatch = String(e.pin).trim() === cleanPin || String(e.pinCode).trim() === cleanPin;
       if (!pinMatch) return false;
@@ -272,7 +236,6 @@ export class AuthShiftService {
       return tenantMatch && storeMatch;
     });
 
-    // 2. Fallback: match by PIN alone
     if (!emp) {
       emp = availableEmployees.find(e => 
         String(e.pin).trim() === cleanPin || String(e.pinCode).trim() === cleanPin
@@ -310,7 +273,6 @@ export class AuthShiftService {
   }
 
   // --- SHIFT LOGGING METHODS ---
-
   public clockInShift(notes?: string): WorkShiftLog | null {
     const emp = this.currentEmployee();
     if (!emp) return null;
@@ -351,12 +313,15 @@ export class AuthShiftService {
     const nowStr = new Date().toISOString();
 
     const allShifts = this.workShifts();
+    
+    // Exact matching to prevent closing other employees' shifts
     const matchingShifts = allShifts.filter(s => 
       s.status === 'WORKING' && 
-      (s.employeeId.toLowerCase() === targetKey || 
-       s.employeeName.toLowerCase() === targetKey || 
-       s.id.toLowerCase() === targetKey ||
-       (targetKey !== '' && s.employeeId.toLowerCase().includes(targetKey)))
+      (
+        String(s.employeeId || '').toLowerCase() === targetKey || 
+        String(s.employeeName || '').toLowerCase() === targetKey || 
+        String(s.id || '').toLowerCase() === targetKey
+      )
     );
 
     const updatedShifts = allShifts.map(s => {
@@ -373,7 +338,11 @@ export class AuthShiftService {
     });
 
     this.workShifts.set(updatedShifts);
-    this.activeWorkShift.set(null);
+
+    const current = this.currentEmployee();
+    if (current && (current.id.toLowerCase() === targetKey || current.name.toLowerCase() === targetKey)) {
+      this.activeWorkShift.set(null);
+    }
 
     if (this.db) {
       for (const shift of matchingShifts) {
@@ -414,8 +383,8 @@ export class AuthShiftService {
       return (
         sEmpId === target ||
         sEmpId === empId ||
-        (empPin !== '' && sEmpId.includes(empPin)) ||
-        (empName !== '' && sEmpName.includes(empName))
+        (empPin !== '' && sEmpId === empPin) ||
+        (empName !== '' && sEmpName === empName)
       );
     });
   }
@@ -447,8 +416,7 @@ export class AuthShiftService {
     }
   }
 
-  // --- STAFF MANAGEMENT METHODS ---
-
+  // --- STAFF CRUD ---
   public addEmployee(empData: { name: string; pinCode: string; role: Role; hourlyRate: number }): { success: boolean; message: string; employee?: Employee } {
     const cleanPin = empData.pinCode.trim();
     if (!empData.name || cleanPin.length < 4 || cleanPin.length > 8) {
