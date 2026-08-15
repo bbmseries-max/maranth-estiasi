@@ -32,7 +32,7 @@ export class WaiterLoginComponent implements OnInit {
   // Waiter Auth Signals
   public enteredPin = signal<string>('');
   public errorMessage = signal<string>('');
-  public startingFloat: number = 50;
+  public startingFloat: number = 0;
   public supportsBiometrics = false;
 
   // Active Store Info computed from License
@@ -43,15 +43,15 @@ export class WaiterLoginComponent implements OnInit {
     this.errorMessage.set('');
     this.supportsBiometrics = !!(window.PublicKeyCredential);
 
-    // 1. Check if device is paired
+    // 1. Check device pairing
     if (!this.deviceService.isDevicePaired()) {
       this.step.set('DEVICE_SETUP');
       return;
     }
 
-    // 2. If paired and employee already in active shift, redirect
-    const emp = this.posService.currentEmployee();
-    if (emp && this.posService.getEmployeeActiveShift(emp.id)) {
+    // 2. Check active user session
+    const emp = this.posService.currentEmployee() || this.authShiftService.currentEmployee();
+    if (emp) {
       this.redirectByRole(emp.role);
     } else {
       this.step.set('PIN_ENTRY');
@@ -59,7 +59,6 @@ export class WaiterLoginComponent implements OnInit {
   }
 
   // --- 🔑 DEVICE PAIRING ACTIONS ---
-
   public async submitActivationKey(): Promise<void> {
     const key = this.licenseInput().trim();
     if (!key) {
@@ -99,7 +98,6 @@ export class WaiterLoginComponent implements OnInit {
   }
 
   // --- ⚡ STAFF PIN PAD ACTIONS ---
-
   public appendDigit(digit: string): void {
     if (this.enteredPin().length < 8) {
       this.enteredPin.update(pin => pin + digit);
@@ -117,21 +115,19 @@ export class WaiterLoginComponent implements OnInit {
   }
 
   public async submitPin(): Promise<void> {
-    const pinValue = this.enteredPin();
+    const pinValue = this.enteredPin().trim();
     if (!pinValue) return;
 
     this.errorMessage.set('');
 
     try {
-      const result: any = await this.authShiftService.loginWithPin(pinValue);
-      const employee: Employee | null = result?.employee || (result?.id ? result : null);
+      // Execute through RestaurantPosService to sync POS state and open drawer
+      const employee = await this.posService.loginWithPin(pinValue);
 
-      if (employee && result?.success !== false) {
-        localStorage.setItem('current_employee', JSON.stringify(employee));
-        localStorage.setItem('maranth_pos_employee', JSON.stringify(employee));
+      if (employee) {
         this.handleSuccessfulLogin(employee);
       } else {
-        this.errorMessage.set(result?.message || 'Άκυρος κωδικός PIN.');
+        this.errorMessage.set('Άκυρος κωδικός PIN. Παρακαλώ δοκιμάστε ξανά.');
         this.enteredPin.set('');
       }
     } catch (err) {
@@ -142,12 +138,7 @@ export class WaiterLoginComponent implements OnInit {
   }
 
   private handleSuccessfulLogin(employee: Employee): void {
-    const role = (employee.role || '').toUpperCase();
-    if (role === 'KITCHEN') {
-      this.router.navigate(['/kitchen']);
-    } else {
-      this.router.navigate(['/floor-plan']);
-    }
+    this.redirectByRole(employee.role);
   }
 
   public cancelShiftSetup(): void {
@@ -157,24 +148,23 @@ export class WaiterLoginComponent implements OnInit {
   }
 
   public startShiftAndVault(): void {
-    const floatAmount = Number(this.startingFloat) >= 0 ? Number(this.startingFloat) : 50;
-    this.posService.clockInShift('Έναρξη βάρδιας μέσω τερματικού');
-    this.posService.openWaiterVault(floatAmount);
-    
+    const floatAmount = Number(this.startingFloat) >= 0 ? Number(this.startingFloat) : 0;
     const emp = this.posService.currentEmployee();
+    
     if (emp) {
+      this.posService.setLoggedInEmployee(emp, floatAmount);
       this.redirectByRole(emp.role);
     } else {
-      this.router.navigate(['/floor-plan']);
+      this.router.navigate(['/floor-plan'], { replaceUrl: true });
     }
   }
 
   private redirectByRole(role?: string): void {
     const r = role?.toUpperCase() || '';
-    if (['BAR', 'BARISTA', 'CHEF', 'KITCHEN'].includes(r)) {
-      this.router.navigate(['/floor-plan']);
+    if (r === 'KITCHEN') {
+      this.router.navigate(['/kitchen'], { replaceUrl: true });
     } else {
-      this.router.navigate(['/floor-plan']);
+      this.router.navigate(['/floor-plan'], { replaceUrl: true });
     }
   }
 }
