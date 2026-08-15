@@ -805,8 +805,20 @@ export class RestaurantPosService {
 
     this.closeWaiterVaultSession(closedVault);
   }
-
-  // In src/app/core/services/restaurant-pos.service.ts
+/**
+   * Checks if an employee has an active open cashier/vault session.
+   */
+  public getEmployeeOpenVault(empIdOrPin: string): WaiterVaultSession | undefined {
+    if (!empIdOrPin) return undefined;
+    const target = String(empIdOrPin).trim().toLowerCase();
+    
+    return this.activeVaultSessions().find(v => {
+      if (v.status !== 'OPEN') return false;
+      const vWaiterId = String(v.waiterId || '').toLowerCase();
+      const vWaiterName = String(v.waiterName || '').toLowerCase();
+      return vWaiterId === target || vWaiterName === target || vWaiterId.includes(target);
+    });
+  }
 
 public async closeWaiterVaultSession(closedSession: WaiterVaultSession): Promise<void> {
     const nowStr = new Date().toISOString();

@@ -164,4 +164,34 @@ export class StaffManagementComponent {
   public handleVaultClosed(closedSession: WaiterVaultSession): void {
     this.handleCloseVaultModal();
   }
+
+  /**
+   * Intercepts shift close requests.
+   * If an active cashier exists, opens the Cashier Closure Modal first.
+   */
+  public handleAttemptCloseShift(employee: Employee): void {
+    const openVault = this.posService.getEmployeeOpenVault(employee.id) || 
+                      this.posService.getEmployeeOpenVault(employee.pinCode || employee.pin || '');
+
+    if (openVault) {
+      const totalInDrawer = (openVault.startingFloat || 0) + (openVault.cashCollected || 0);
+      const confirmCloseVault = confirm(
+        `⚠️ Ανοιχτό Ταμείο (${employee.name})\n\n` +
+        `Υπάρχει ενεργό ταμείο με αναμενόμενα μετρητά: €${totalInDrawer.toFixed(2)}.\n` +
+        `Πρέπει να γίνει καταμέτρηση και κλείσιμο ταμείου πριν κλείσει η βάρδια.\n\n` +
+        `Θέλετε να ανοίξει η καταμέτρηση τώρα;`
+      );
+
+      if (confirmCloseVault) {
+        this.openVaultModalForEmployee(employee);
+      }
+      return;
+    }
+
+    // No open vault -> Safe to close shift directly
+    const confirmSimpleClose = confirm(`Είστε σίγουροι ότι θέλετε να κλείσετε τη βάρδια του/της ${employee.name};`);
+    if (confirmSimpleClose) {
+      this.authShiftService.clockOutEmployeeShift(employee.id, `Κλείσιμο βάρδιας από διαχειριστή`);
+    }
+  }
 }
