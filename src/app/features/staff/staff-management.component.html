@@ -1,167 +1,149 @@
-// src/app/features/staff/staff-management.component.ts
+<div class="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-6 font-sans select-none relative">
+  
+  <!-- HEADER -->
+  <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-6 gap-3 shadow-lg">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center text-xl font-black">
+        👥
+      </div>
+      <div>
+        <h1 class="text-xl font-black text-white m-0 tracking-tight">ΔΙΑΧΕΙΡΙΣΗ ΠΡΟΣΩΠΙΚΟΥ</h1>
+        <p class="text-xs text-slate-400 font-medium m-0">
+          Σύνολο Υπαλλήλων: {{ posService.employees().length }}
+        </p>
+      </div>
+    </div>
 
-import { Component, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { AuthShiftService } from '../../core/services/auth-shift.service';
-import { EmployeeFormComponent } from './components/employee-form/employee-form.component';
-import { FormsModule } from '@angular/forms';
-import { Employee, Role, WaiterVaultSession } from '../../core/modals/restaurant-pos.modals';
-import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
-import { WaiterVaultModalComponent } from './components/waiter-vault-modal/waiter-vault-modal.component';
+    <!-- This button triggers showAddModal.set(true) -->
+    <button (click)="openAddModal()"
+            class="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5">
+      <span>➕</span>
+      <span>Νέος Υπάλληλος</span>
+    </button>
+  </div>
 
-@Component({
-  selector: 'app-staff-management',
-  standalone: true,
-  imports: [
-    CommonModule,
-    EmployeeFormComponent,
-    FormsModule, 
-    WaiterVaultModalComponent
-  ],
-  templateUrl: './staff-management.component.html'
-})
-export class StaffManagementComponent {
-  public posService = inject(RestaurantPosService);
-  public authShiftService = inject(AuthShiftService);
-
-  public showAddForm = signal<boolean>(false);
-  public selectedEmployee = signal<Employee | null>(null);
-  public showAddModal = signal<boolean>(false);
-  public isRegisteringBiometrics = signal<boolean>(false);
-
-  public isVaultModalOpen = signal<boolean>(false);
-  public activeVaultSessionForModal = signal<WaiterVaultSession | null>(null);
-
-  public newEmpName = '';
-  public newEmpPin = '';
-  public newEmpRole: Role = 'WAITER';
-  public newEmpRate = 7.0;
-
-  public openNewEmployeeForm(): void {
-    this.showAddForm.set(true);
-  }
-
-  public hideNewEmployeeForm(): void {
-    this.showAddForm.set(false);
-  }
-
-  public selectEmployee(emp: Employee): void {
-    this.selectedEmployee.set(emp);
-  }
-
-  public toggleStatus(emp: Employee): void {
-    const currentActive = emp.isActive ?? emp.active ?? true;
-    this.posService.toggleEmployeeActiveStatus(emp.id, !currentActive);
+  <!-- MAIN LAYOUT -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     
-    this.selectedEmployee.set({
-      ...emp,
-      isActive: !currentActive,
-      active: !currentActive
-    });
-  }
+    <!-- STAFF LIST -->
+    <div class="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+      @for (emp of posService.employees(); track emp.id) {
+        <div (click)="selectEmployee(emp)"
+             [class]="selectedEmployee()?.id === emp.id ? 'border-amber-500 bg-slate-900/90 shadow-amber-500/10' : 'border-slate-800 bg-slate-900 hover:border-slate-700'"
+             class="border-2 rounded-2xl p-4 flex flex-col justify-between gap-3 shadow-lg cursor-pointer transition-all relative overflow-hidden">
+          
+          <div class="flex justify-between items-start">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-lg font-bold text-amber-400">
+                👤
+              </div>
+              <div>
+                <h3 class="font-black text-white text-base m-0">{{ emp.name }}</h3>
+                <span class="text-xs text-amber-400 font-bold">
+                  {{ posService.getRoleLabel(emp.role) }}
+                </span>
+              </div>
+            </div>
 
-  public async onRegisterFingerprint(emp: Employee | null): Promise<void> {
-    if (!emp) return;
+            <span [class]="(emp.isActive ?? emp.active ?? true) ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' : 'bg-red-500/20 text-red-400 border-red-500/40'"
+                  class="px-2 py-0.5 rounded-full text-[10px] font-black border">
+              {{ (emp.isActive ?? emp.active ?? true) ? 'ΕΝΕΡΓΟΣ' : 'ΑΝΕΝΕΡΓΟΣ' }}
+            </span>
+          </div>
 
-    this.isRegisteringBiometrics.set(true);
+          <div class="flex justify-between items-center text-xs text-slate-400 pt-2 border-t border-slate-800">
+            <span class="font-mono">PIN: ••••</span>
+            <span class="flex items-center gap-1 font-bold" [class.text-emerald-400]="emp.biometricPublicKey" [class.text-slate-500]="!emp.biometricPublicKey">
+              <span>👆</span>
+              <span>{{ emp.biometricPublicKey ? 'Αποτύπωμα OK' : 'Χωρίς Αποτύπωμα' }}</span>
+            </span>
+          </div>
 
-    try {
-      const result = await this.posService.registerEmployeeBiometrics(emp);
-      alert(result.message);
-
-      if (result.success) {
-        const updated = this.posService.employees().find(e => e.id === emp.id);
-        if (updated) {
-          this.selectedEmployee.set({ ...updated });
-        }
+        </div>
       }
-    } catch {
-      alert('Αποτυχία καταχώρησης αποτυπώματος.');
-    } finally {
-      this.isRegisteringBiometrics.set(false);
-    }
+    </div>
+
+    <!-- EMPLOYEE EDIT & FINGERPRINT PANEL -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col gap-4">
+      @if (selectedEmployee(); as emp) {
+        <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+          <div>
+            <h2 class="text-lg font-black text-white m-0">{{ emp.name }}</h2>
+            <span class="text-xs text-amber-400 font-bold">ID: {{ emp.id }}</span>
+          </div>
+
+          <button (click)="toggleStatus(emp)"
+                  [class]="(emp.isActive ?? emp.active ?? true) ? 'bg-red-500/20 text-red-400 border-red-500/40' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'"
+                  class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer">
+            {{ (emp.isActive ?? emp.active ?? true) ? 'Απενεργοποίηση' : 'Ενεργοποίηση' }}
+          </button>
+        </div>
+
+        <!-- FINGERPRINT REGISTRATION -->
+        <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col gap-3">
+          <label class="block text-xs font-black text-amber-400 uppercase tracking-wider">
+            🔑 ΒΙΟΜΕΤΡΙΚΗ ΤΑΥΤΟΠΟΙΗΣΗ
+          </label>
+          
+          <button type="button"
+                  (click)="onRegisterFingerprint(emp)"
+                  [disabled]="isRegisteringBiometrics()"
+                  class="w-full py-3.5 px-4 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 font-bold text-xs border border-amber-500/40 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 disabled:opacity-50">
+            <span class="text-lg">👆</span>
+            <span>
+              {{ isRegisteringBiometrics() ? 'Παρακαλώ αγγίξτε τον αισθητήρα...' : (emp.biometricPublicKey ? 'Ενημέρωση Αποτυπώματος' : 'Καταχώρηση Νέου Αποτυπώματος') }}
+            </span>
+          </button>
+
+          @if (emp.biometricPublicKey) {
+            <div class="flex items-center justify-center gap-1.5 text-xs text-emerald-400 font-bold text-center">
+              <span>✓</span>
+              <span>Ενεργοποιημένο αποτύπωμα στη συσκευή</span>
+            </div>
+          } @else {
+            <p class="text-xs text-slate-500 text-center m-0">
+              Δεν έχει καταχωρηθεί αποτύπωμα για αυτόν τον υπάλληλο.
+            </p>
+          }
+        </div>
+
+        <!-- VAULT SHIFT CLOSURE TRIGGER BUTTON -->
+        <button (click)="openVaultModalForEmployee(emp)"
+                class="w-full py-3 px-4 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 font-bold text-xs border border-amber-500/30 flex items-center justify-center gap-2 cursor-pointer transition-all">
+          <span>🔐</span>
+          <span>Κλείσιμο Ταμείου Βάρδιας (Vault)</span>
+        </button>
+
+        <div class="text-xs text-slate-400 flex flex-col gap-1 pt-2">
+          <div><strong>Ωριαία Αμοιβή:</strong> €{{ emp.hourlyRate || 0 }}/ώρα</div>
+          <div><strong>Ρόλος:</strong> {{ posService.getRoleLabel(emp.role) }}</div>
+        </div>
+
+      } @else {
+        <div class="py-16 text-center text-slate-500 font-bold text-xs">
+          👈 Επιλέξτε έναν υπάλληλο από τη λίστα για διαχείριση.
+        </div>
+      }
+    </div>
+
+  </div>
+
+  <!-- 🚀 NEW MODAL: ADD NEW EMPLOYEE VIA COMPONENT -->
+  @if (showAddModal()) {
+    <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+      <div class="w-full max-w-md animate-fade-in">
+        <!-- The form itself has the background and padding. We just bind the close event! -->
+        <app-employee-form (closeForm)="showAddModal.set(false)"></app-employee-form>
+      </div>
+    </div>
   }
 
-  public openAddModal(): void {
-    this.newEmpName = '';
-    this.newEmpPin = '';
-    this.newEmpRole = 'WAITER';
-    this.newEmpRate = 7.0;
-    this.showAddModal.set(true);
-  }
+  <!-- WAITER VAULT CLOSURE MODAL -->
+  <app-waiter-vault-modal
+    [session]="activeVaultSessionForModal()"
+    [isOpen]="isVaultModalOpen()"
+    (closeModal)="handleCloseVaultModal()"
+    (vaultClosed)="handleVaultClosed($event)"
+  ></app-waiter-vault-modal>
 
-  public saveNewEmployee(): void {
-    const cleanPin = this.newEmpPin.trim();
-    if (!this.newEmpName.trim() || cleanPin.length < 4) {
-      alert('Παρακαλώ συμπληρώστε όνομα και PIN (τουλάχιστον 4 ψηφία).');
-      return;
-    }
-
-    const res = this.posService.addEmployee({
-      name: this.newEmpName.trim(),
-      pinCode: cleanPin,
-      role: this.newEmpRole,
-      hourlyRate: Number(this.newEmpRate) || 7.0
-    });
-
-    if (res.success && res.employee) {
-      this.showAddModal.set(false);
-      this.selectedEmployee.set(res.employee);
-    } else {
-      alert(res.message);
-    }
-  }
-
-  public openVaultModalForEmployee(employee: Employee): void {
-    const allSessions = this.posService.allVaultSessions() || [];
-    const cleanPin = (employee.pinCode || employee.pin || '').trim();
-
-    // Check for open vault or fallback to latest session
-    let session = allSessions.find(
-      s => (
-        s.waiterId === employee.id || 
-        s.waiterId === cleanPin || 
-        s.waiterName === employee.name ||
-        (s.waiterId && cleanPin && s.waiterId.includes(cleanPin))
-      ) && s.status === 'OPEN'
-    );
-
-    if (!session) {
-      session = allSessions.find(
-        s => (
-          s.waiterId === employee.id || 
-          s.waiterId === cleanPin || 
-          s.waiterName === employee.name
-        )
-      );
-    }
-
-    if (!session) {
-      session = {
-        id: `VAULT-${employee.id}-${Date.now()}`,
-        tenantId: employee.tenantId || this.authShiftService.activeTenantId(),
-        storeId: employee.storeId || this.authShiftService.activeStoreId(),
-        shiftLogId: `SHIFT-${employee.id}-${Date.now()}`,
-        waiterId: employee.id,
-        waiterName: employee.name,
-        openedAt: new Date().toISOString(),
-        startingFloat: 0.00,
-        cashCollected: 0.00,
-        cardCollected: 0.00,
-        status: 'OPEN'
-      };
-    }
-
-    this.activeVaultSessionForModal.set(session);
-    this.isVaultModalOpen.set(true);
-  }
-
-  public handleCloseVaultModal(): void {
-    this.isVaultModalOpen.set(false);
-    this.activeVaultSessionForModal.set(null);
-  }
-
-  public handleVaultClosed(closedSession: WaiterVaultSession): void {
-    this.handleCloseVaultModal();
-  }
-}
+</div>

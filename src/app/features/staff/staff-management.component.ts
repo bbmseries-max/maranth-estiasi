@@ -1,3 +1,5 @@
+// src/app/features/staff/staff-management.component.ts
+
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AuthShiftService } from '../../core/services/auth-shift.service';
@@ -111,22 +113,34 @@ export class StaffManagementComponent {
   }
 
   public openVaultModalForEmployee(employee: Employee): void {
-    const allSessions = this.posService.activeVaultSessions() || [];
-    
+    const allSessions = this.posService.allVaultSessions() || [];
+    const cleanPin = (employee.pinCode || employee.pin || '').trim();
+
+    // Check for open vault or fallback to latest session
     let session = allSessions.find(
       s => (
         s.waiterId === employee.id || 
-        s.waiterId === employee.pin || 
+        s.waiterId === cleanPin || 
         s.waiterName === employee.name ||
-        (s.waiterId && employee.pin && s.waiterId.includes(employee.pin))
+        (s.waiterId && cleanPin && s.waiterId.includes(cleanPin))
       ) && s.status === 'OPEN'
     );
 
     if (!session) {
+      session = allSessions.find(
+        s => (
+          s.waiterId === employee.id || 
+          s.waiterId === cleanPin || 
+          s.waiterName === employee.name
+        )
+      );
+    }
+
+    if (!session) {
       session = {
         id: `VAULT-${employee.id}-${Date.now()}`,
-        tenantId: employee.tenantId || 'Tirane kafe 1974',
-        storeId: employee.storeId || 'store-2',
+        tenantId: employee.tenantId || this.authShiftService.activeTenantId(),
+        storeId: employee.storeId || this.authShiftService.activeStoreId(),
         shiftLogId: `SHIFT-${employee.id}-${Date.now()}`,
         waiterId: employee.id,
         waiterName: employee.name,
@@ -147,8 +161,7 @@ export class StaffManagementComponent {
     this.activeVaultSessionForModal.set(null);
   }
 
- public handleVaultClosed(closedSession: WaiterVaultSession): void {
-  console.log('Vault session closed:', closedSession.id);
-  this.handleCloseVaultModal();
-}
+  public handleVaultClosed(closedSession: WaiterVaultSession): void {
+    this.handleCloseVaultModal();
+  }
 }
