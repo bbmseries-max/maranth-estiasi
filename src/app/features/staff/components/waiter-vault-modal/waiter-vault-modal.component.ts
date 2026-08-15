@@ -29,17 +29,17 @@ export class WaiterVaultModalComponent {
   public cashHandedOver = signal<number | null>(null);
   public notes = signal<string>('');
 
-  // Getter computations for reliable recalculation in HTML templates
-  public get expectedCash(): number {
+  // Callable methods for template compatibility with expectedCash() and variance()
+  public expectedCash(): number {
     if (!this.session) return 0;
     const starting = this.session.startingFloat || 0;
     const collected = this.session.cashCollected || 0;
     return Number((starting + collected).toFixed(2));
   }
 
-  public get variance(): number {
+  public variance(): number {
     const actual = this.cashHandedOver() ?? 0;
-    return Number((actual - this.expectedCash).toFixed(2));
+    return Number((actual - this.expectedCash()).toFixed(2));
   }
 
   public addDenomination(amount: number): void {
@@ -55,7 +55,7 @@ export class WaiterVaultModalComponent {
     if (!this.session) return;
 
     const actualCash = this.cashHandedOver() ?? 0;
-    const expected = this.expectedCash;
+    const expected = this.expectedCash();
     const varAmount = Number((actualCash - expected).toFixed(2));
 
     const closedSession: WaiterVaultSession = {
@@ -91,4 +91,4 @@ export class WaiterVaultModalComponent {
     this.notes.set('');
     this.closeModal.emit();
   }
-}
+} 
