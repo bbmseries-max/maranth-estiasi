@@ -51,10 +51,12 @@ interface KitchenTicket {
       <div class="flex flex-col sm:flex-row justify-between items-center bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-4 gap-3 shadow-lg">
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center text-xl font-black">
-            👨‍🍳
+            {{ stationFilter() === 'BAR' ? '☕' : stationFilter() === 'KITCHEN' ? '🍳' : '👨‍🍳' }}
           </div>
           <div>
-            <h1 class="text-xl font-black text-white m-0 tracking-tight">KITCHEN & BAR DISPLAY</h1>
+            <h1 class="text-xl font-black text-white m-0 tracking-tight">
+              {{ stationFilter() === 'BAR' ? 'ΟΘΟΝΗ BAR / ΚΑΦΕΔΕΣ' : stationFilter() === 'KITCHEN' ? 'ΟΘΟΝΗ ΚΟΥΖΙΝΑΣ' : 'KITCHEN & BAR DISPLAY' }}
+            </h1>
             <p class="text-xs text-slate-400 font-medium m-0">Ενεργές Παραγγελίες ({{ filteredTickets().length }})</p>
           </div>
         </div>
@@ -80,7 +82,7 @@ interface KitchenTicket {
 
       <!-- KDS TICKETS GRID -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
-        @for (ticket of filteredTickets(); track ticket.orderId) {
+        @for (ticket of filteredTickets(); track ticket.orderId + stationFilter()) {
           <div [class]="getTicketBorderClass(ticket)"
                class="bg-slate-900 border-2 rounded-2xl p-4 shadow-xl flex flex-col justify-between min-h-[220px] transition-all">
             
@@ -105,7 +107,7 @@ interface KitchenTicket {
               <!-- ORDER NOTE ALERT -->
               @if (ticket.notes) {
                 <div class="bg-amber-500/20 border-l-4 border-amber-500 text-amber-300 p-3 text-xs font-bold rounded-r-xl break-words">
-                  ⚠️ ΣΗΜΕΙΩΣΗ ΠΑΡΑΓΓΕΛΙΑΣ: {{ ticket.notes }}
+                  ⚠️ ΣΗΜΕΙΩΣΗ: {{ ticket.notes }}
                 </div>
               }
 
@@ -132,19 +134,19 @@ interface KitchenTicket {
 
                     <!-- MODIFIERS -->
                     @if (item.modifiers && item.modifiers.length > 0) {
-                      <div class="flex flex-wrap gap-1.5 pl-9">
-                        @for (mod of item.modifiers; track mod.id) {
-                          <span class="text-xs font-extrabold bg-amber-400/10 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-md">
-                            + {{ mod.name }}
-                          </span>
-                        }
-                      </div>
-                    }
+  <div class="flex flex-wrap gap-1.5 pl-9">
+    @for (mod of item.modifiers; track mod.id || mod.optionId || $index) {
+      <span class="text-xs font-extrabold bg-amber-400/10 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-md">
+        + {{ mod.name || mod.optionName || 'Επιλογή' }}
+      </span>
+    }
+  </div>
+}
 
                     <!-- ITEM SPECIFIC NOTE -->
                     @if (item.itemNotes) {
                       <div class="text-xs font-bold text-rose-400 italic pl-9 break-words">
-                        ↳ Request: "{{ item.itemNotes }}"
+                        ↳ Σημείωση: "{{ item.itemNotes }}"
                       </div>
                     }
                   </div>
@@ -152,17 +154,17 @@ interface KitchenTicket {
               </div>
             </div>
 
-            <!-- Complete Entire Ticket Footer Button -->
+            <!-- Complete Visible Items in Ticket -->
             <button (click)="completeEntireTicket(ticket)"
                     class="mt-4 w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-slate-950 font-black text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer flex items-center justify-center gap-1">
-              <span>✓ Ολοκλήρωση Δελτίου</span>
+              <span>✓ Έτοιμα Όλα ({{ ticket.items.length }})</span>
             </button>
 
           </div>
         } @empty {
           <div class="col-span-full text-center py-20 bg-slate-900/50 border-2 border-dashed border-slate-800 rounded-3xl text-slate-500 font-bold">
-            <span class="text-4xl block mb-2">☕</span>
-            Δεν υπάρχουν ενεργά δελτία στην κουζίνα / bar.
+            <span class="text-4xl block mb-2">{{ stationFilter() === 'BAR' ? '☕' : '🍳' }}</span>
+            Δεν υπάρχουν ενεργές παραγγελίες για {{ stationFilter() === 'BAR' ? 'το Bar' : stationFilter() === 'KITCHEN' ? 'την Κουζίνα' : 'Κουζίνα / Bar' }}.
           </div>
         }
       </div>
@@ -179,17 +181,21 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
   private knownItemStateMap = new Map<string, ItemPreparationStatus>();
   private isInitialLoad = true;
 
+  // Active tickets that have actually been SENT to the kitchen/bar (SENT_TO_KITCHEN or PREPARING)
   public activeTickets = computed<KitchenTicket[]>(() => {
     const tables = this.posService.tables();
     const tickets: KitchenTicket[] = [];
 
     for (const table of tables) {
       if (table.activeOrder && table.activeOrder.items && table.activeOrder.items.length > 0) {
-        const pendingItems = table.activeOrder.items.filter(i => i.status !== 'VOIDED' && i.status !== 'SERVED');
+        // Only show items that have been officially sent (ignore unsent PENDING and finished SERVED/VOIDED)
+        const pendingItems = table.activeOrder.items.filter(
+          i => i.status === 'SENT_TO_KITCHEN' || i.status === 'PREPARING'
+        );
         
         if (pendingItems.length > 0) {
           tickets.push({
-            tableNumber: table.tableNumber || table.number,
+            tableNumber: table.tableNumber || table.number || 0,
             zone: table.zone || table.section || 'Σάλα',
             tableId: table.id,
             orderId: table.activeOrder.orderId,
@@ -206,6 +212,36 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
     return tickets;
   });
 
+  // Determines whether an item belongs to the BAR or KITCHEN
+  private isBarItem(item: TableOrderItem): boolean {
+    const products = this.posService.products();
+    const prod = products.find(p => p.id === item.productId);
+    
+    const catId = (prod?.categoryId || '').toUpperCase();
+    const catName = (prod?.categoryName || '').toLowerCase();
+
+    // 1. Explicit Category ID / Name Match
+    if (catId.includes('COFFEE') || catId.includes('DRINK') || catId.includes('BAR') || catId.includes('BEVERAGE')) {
+      return true;
+    }
+    if (catName.includes('καφέ') || catName.includes('coffee') || catName.includes('ροφήμα') || catName.includes('ποτό') || catName.includes('bar')) {
+      return true;
+    }
+
+    // 2. Keyword Match on Product Name
+    const name = (item.productName || prod?.name || '').toLowerCase();
+    return (
+      name.includes('καφέ') || name.includes('espresso') || name.includes('freddo') || 
+      name.includes('cappuccino') || name.includes('latte') || name.includes('nescafe') || 
+      name.includes('frappe') || name.includes('ελληνικ') || name.includes('τσάι') || 
+      name.includes('νερό') || name.includes('ποτό') || name.includes('μπύρα') || 
+      name.includes('χυμό') || name.includes('drink') || name.includes('coffee') || 
+      name.includes('cocktail') || name.includes('αναψυκτικ') || name.includes('σοκολάτα') || 
+      name.includes('soda') || name.includes('beer') || name.includes('cola') || 
+      name.includes('sprite') || name.includes('fanta') || name.includes('aperol')
+    );
+  }
+
   public filteredTickets = computed<KitchenTicket[]>(() => {
     const all = this.activeTickets();
     const filter = this.stationFilter();
@@ -214,14 +250,7 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
 
     return all.map(ticket => {
       const matchingItems = ticket.items.filter(item => {
-        const name = (item.productName || '').toLowerCase();
-        const isDrink = name.includes('καφέ') || name.includes('espresso') || name.includes('freddo') || 
-                        name.includes('τσάι') || name.includes('νερό') || name.includes('ποτό') || 
-                        name.includes('μπύρα') || name.includes('χυμό') || name.includes('drink') ||
-                        name.includes('coffee') || name.includes('cocktail') || name.includes('αναψυκτικ') ||
-                        name.includes('σοκολάτα') || name.includes('soda') || name.includes('beer') ||
-                        name.includes('cappuccino') || name.includes('latte');
-        
+        const isDrink = this.isBarItem(item);
         return filter === 'BAR' ? isDrink : !isDrink;
       });
 
@@ -235,7 +264,6 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
   });
 
   constructor() {
-    // 🔔 Real-time automated Void Alert Monitor
     effect(() => {
       const tables = this.posService.tables();
       if (tables.length === 0) return;
@@ -246,11 +274,10 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
             const previousStatus = this.knownItemStateMap.get(item.id);
             this.knownItemStateMap.set(item.id, item.status);
 
-            // Trigger alert if an item previously sent/preparing gets voided remotely
             if (!this.isInitialLoad && previousStatus && previousStatus !== 'VOIDED' && item.status === 'VOIDED') {
               this.handleVoidNotification({
                 id: `VOID-${Date.now()}-${item.id}`,
-                tableNumber: table.tableNumber || table.number,
+                tableNumber: table.tableNumber || table.number || 0,
                 itemName: `${item.quantity}x ${item.productName}`,
                 reason: item.itemNotes || 'Ακύρωση από σερβιτόρο'
               });
@@ -269,7 +296,7 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
     const emp = this.posService.currentEmployee();
     const role = (emp?.role as string)?.toUpperCase();
 
-    if (role === 'BARMAN' || role === 'BARISTA') {
+    if (role === 'BARMAN' || role === 'BARISTA' || role === 'BAR') {
       this.stationFilter.set('BAR');
     } else if (role === 'KITCHEN' || role === 'CHEF') {
       this.stationFilter.set('KITCHEN');
@@ -330,7 +357,9 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
   }
 
   public completeEntireTicket(ticket: KitchenTicket): void {
-    this.posService.completeKitchenTicket(ticket.orderId, ticket.tableId);
+    for (const item of ticket.items) {
+      this.posService.bumpOrderItemStatus(ticket.tableId, item.id);
+    }
   }
 
   public handleVoidNotification(voidData: { id: string; tableNumber: number; itemName: string; reason?: string }): void {

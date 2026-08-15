@@ -1,3 +1,5 @@
+// src/app/core/modals/modifier.modal.ts
+
 export interface ModifierOption {
   id: string;
   storeId?: string;
@@ -21,11 +23,14 @@ export interface ModifierGroup {
 }
 
 export interface SelectedModifier {
-  groupId: string;
+  groupId?: string;
   storeId?: string;
   tenantId?: string;
-  groupName: string;
-  optionId: string;
-  optionName: string;
-  priceExtra: number;
+  groupName?: string;
+  optionId?: string;
+  optionName?: string;
+  id?: string;
+  name?: string;
+  priceExtra?: number;
+  price?: number;
 }

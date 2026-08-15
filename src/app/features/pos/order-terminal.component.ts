@@ -5,13 +5,14 @@ import { MenuSeederService } from '../../core/services/menu-seeder.service';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { TenantContextService } from '../../core/services/tenant-context.service';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
+import { ThermalPrinterService } from '../../core/services/thermal-printer.service';
 import { 
   RestaurantTable, 
   TableOrderItem,
   Product, 
   ModifierGroup, 
   ModifierOption, 
-  SelectedModifier 
+  SelectedModifier
 } from '../../core/modals';
 
 @Component({
@@ -25,6 +26,7 @@ import {
   templateUrl: './order-terminal.component.html'
 })
 export class OrderTerminalComponent implements OnInit {
+  private printerService = inject(ThermalPrinterService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private tenantContext = inject(TenantContextService);
@@ -326,11 +328,30 @@ export class OrderTerminalComponent implements OnInit {
   }
 
   public printBill(): void {
-    const tableId = this.activeTableId();
-    if (tableId) {
-      this.posService.printTableBill(tableId);
-    }
+  const table = this.activeTable();
+  if (!table) return;
+
+  const items = table.activeOrder?.items || [];
+  const total = Number(table.activeOrder?.grandTotal || table.currentTotal || 0);
+  const waiter = table.waiterName || this.posService.currentEmployee()?.name || 'Σερβιτόρος';
+
+  if (items.length === 0 || total <= 0) {
+    alert('⚠️ Δεν υπάρχουν προϊόντα στην παραγγελία για εκτύπωση λογαριασμού.');
+    return;
   }
+
+  // 1. Trigger thermal receipt print window
+  this.printerService.printTableBillReceipt(
+    table.number || table.tableNumber || 1,
+    table.name || `Τραπέζι ${table.number}`,
+    items,
+    total,
+    waiter
+  );
+
+  // 2. Mark table status as BILL_PRINTED in Firestore & local state
+  this.posService.printTableBill(table.id);
+}
 
   // --- STYLING HELPERS ---
   public getItemCardBorderClass(status: string): string {

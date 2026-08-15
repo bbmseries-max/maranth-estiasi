@@ -1,18 +1,20 @@
-// src/app/core/models/order.model.ts
+// src/app/core/modals/order.modal.ts
 
 import { GreekVatRate } from './common.modal';
+export type { SelectedModifier } from './modifier.modal';
 
 export type ItemPreparationStatus = 'PENDING' | 'SENT_TO_KITCHEN' | 'PREPARING' | 'SERVED' | 'VOIDED';
 export type OrderStatus = 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'PENDING' | 'SENT_TO_KITCHEN' | 'PREPARING' | 'SERVED';
 
 export interface OrderModifier {
-  id: string;
-  storeId?: string;
-  tenantId?: string;
-  name: string;
-  priceExtra: number;
-  category?: string;
-  notes?: string;
+  id?: string;
+  name?: string;
+  optionId?: string;
+  optionName?: string;
+  groupId?: string;
+  groupName?: string;
+  priceExtra?: number;
+  price?: number;
 }
 
 export interface TableOrderItem {
