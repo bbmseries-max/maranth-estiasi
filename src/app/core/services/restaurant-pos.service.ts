@@ -93,6 +93,46 @@ export class RestaurantPosService {
   public unreadReadyNotifications = this.tableOrderService.unreadReadyNotifications;
   public occupiedTables = this.tableOrderService.occupiedTables;
 
+  public async seedDefaultMenuForCurrentStore(): Promise<void> {
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+
+    const starterCategories = [
+      { id: `${storeId}_cat_coffee`, name: 'Καφέδες & Ροφήματα', code: 'COFFEE', icon: '☕', order: 1, tenantId, storeId },
+      { id: `${storeId}_cat_drinks`, name: 'Αναψυκτικά & Χυμοί', code: 'DRINKS', icon: '🥤', order: 2, tenantId, storeId },
+      { id: `${storeId}_cat_food`, name: 'Σνακ & Φαγητό', code: 'FOOD', icon: '🥪', order: 3, tenantId, storeId },
+      { id: `${storeId}_cat_bar`, name: 'Μπύρες & Ποτά', code: 'BAR', icon: '🍺', order: 4, tenantId, storeId }
+    ];
+
+    const starterProducts: Product[] = [
+      { id: `${storeId}_prod_1`, name: 'Espresso', price: 1.80, categoryId: 'COFFEE', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_2`, name: 'Espresso Double', price: 2.20, categoryId: 'COFFEE', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_3`, name: 'Freddo Espresso', price: 2.30, categoryId: 'COFFEE', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_4`, name: 'Cappuccino', price: 2.50, categoryId: 'COFFEE', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_5`, name: 'Freddo Cappuccino', price: 2.70, categoryId: 'COFFEE', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_6`, name: 'Ελληνικός Διπλός', price: 2.00, categoryId: 'COFFEE', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_7`, name: 'Φυσικός Χυμός Πορτοκάλι', price: 3.50, categoryId: 'DRINKS', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_8`, name: 'Τοστ Γαλοπούλα - Κασέρι', price: 2.80, categoryId: 'FOOD', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_9`, name: 'Club Sandwich Classic', price: 6.50, categoryId: 'FOOD', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_10`, name: 'Μπύρα Alfa 330ml', price: 3.50, categoryId: 'BAR', taxRate: 24, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_11`, name: 'Aperol Spritz', price: 7.00, categoryId: 'BAR', taxRate: 24, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_12`, name: 'Νερό 500ml', price: 0.50, categoryId: 'DRINKS', taxRate: 13, isActive: true, tenantId, storeId }
+    ];
+
+    if ((this.inventoryService as any).categories) {
+      (this.inventoryService as any).categories.set(starterCategories);
+    }
+    this.products.update(list => [...list.filter(p => p.storeId !== storeId), ...starterProducts]);
+
+    if (this.db) {
+      for (const cat of starterCategories) {
+        await setDoc(doc(this.db, 'categories', cat.id), cleanUndefined(cat), { merge: true }).catch(() => {});
+      }
+      for (const prod of starterProducts) {
+        await setDoc(doc(this.db, 'products', prod.id), cleanUndefined(prod), { merge: true }).catch(() => {});
+      }
+    }
+  }
+
   // --- OCCUPIED TABLES COUNT ---
   public occupiedTablesCount = computed(() => {
     const currentTenant = this.tenantContext.currentTenantId();
