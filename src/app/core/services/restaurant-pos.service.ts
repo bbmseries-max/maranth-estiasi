@@ -801,76 +801,91 @@ export class RestaurantPosService {
     this.closeWaiterVaultSession(closedVault);
   }
 
-  public async closeWaiterVaultSession(closedSession: WaiterVaultSession): Promise<void> {
-    const nowStr = new Date().toISOString();
+  // In src/app/core/services/restaurant-pos.service.ts
 
-    const finalizedVault: WaiterVaultSession = {
-      ...closedSession,
-      status: 'CLOSED',
-      closedAt: nowStr
-    };
+public async closeWaiterVaultSession(closedSession: WaiterVaultSession): Promise<void> {
+  const nowStr = new Date().toISOString();
+  const currentEmp = this.currentEmployee();
 
-    this.activeVaultSessions.update(list => list.filter(v => v.id !== closedSession.id));
-    this.allVaultSessions.update(list => list.map(v => v.id === closedSession.id ? finalizedVault : v));
-    
-    if (this.activeVaultSession()?.id === closedSession.id) {
-      this.activeVaultSession.set(null);
+  const finalizedVault: WaiterVaultSession = {
+    ...closedSession,
+    status: 'CLOSED',
+    closedAt: nowStr
+  };
+
+  // 1. Update lists without touching other open vaults
+  this.activeVaultSessions.update(list => list.filter(v => v.id !== closedSession.id));
+  this.allVaultSessions.update(list => list.map(v => v.id === closedSession.id ? finalizedVault : v));
+  
+  // 2. Only nullify the active vault signal IF the closed vault belongs to the logged-in user
+  const myCurrentVault = this.activeVaultSession();
+  if (myCurrentVault && myCurrentVault.id === closedSession.id) {
+    this.activeVaultSession.set(null);
+  }
+
+  // 3. Persist specific vault closure to Firestore
+  if (this.db && closedSession.id) {
+    try {
+      await setDoc(doc(this.db, 'vaults', closedSession.id), cleanUndefined(finalizedVault), { merge: true });
+    } catch (err) {
+      console.error('Error saving closed vault to Firestore:', err);
     }
+  }
 
-    if (this.db && closedSession.id) {
-      try {
-        await setDoc(doc(this.db, 'vaults', closedSession.id), cleanUndefined(finalizedVault), { merge: true });
-      } catch (err) {
-        console.error('Error saving closed vault to Firestore:', err);
-      }
-    }
+  // 4. Clock out ONLY the target employee (by their unique ID)
+  const targetEmpId = closedSession.waiterId || closedSession.waiterName;
+  await this.authShiftService.clockOutEmployeeShift(
+    targetEmpId, 
+    `Κλείσιμο ταμείου (${closedSession.waiterName})`
+  );
 
-    const waiterKey = closedSession.waiterId || closedSession.waiterName;
-    await this.authShiftService.clockOutEmployeeShift(waiterKey, `Κλείσιμο ταμείου (${closedSession.waiterName})`);
-
+  // 5. Only reset activeWorkShift if the logged-in user is the one who was clocked out
+  if (currentEmp && (currentEmp.id === targetEmpId || currentEmp.name === targetEmpId)) {
     this.authShiftService.activeWorkShift.set(null);
-
-    this.logAudit(
-      'VAULT_CLOSED',
-      `Κλείσιμο ταμείου & έξοδος βάρδιας: ${closedSession.waiterName}. Μετρητά: €${(closedSession.cashHandedOver || 0).toFixed(2)}`
-    );
   }
 
-  // --- Z-REPORT & SYSTEM RESET ---
-  public closeDayAndGenerateZReport(): DailyZReportSnapshot {
-    const emp = this.currentEmployee();
-    const { tenantId, storeId } = this.getActiveTenantAndStore();
-    const vat = this.vatBreakdown();
-    const todayStr = new Date().toLocaleDateString('el-GR');
+  this.logAudit(
+    'VAULT_CLOSED',
+    `Κλείσιμο ταμείου & βάρδιας: ${closedSession.waiterName}. Μετρητά: €${(closedSession.cashHandedOver || 0).toFixed(2)}`
+  );
+}
 
-    const snapshot: DailyZReportSnapshot = {
-      id: `Z-REPORT-${Date.now()}`,
-      tenantId: emp?.tenantId || tenantId,
-      storeId: emp?.storeId || storeId,
-      dateStr: todayStr,
-      timestamp: new Date().toISOString(),
-      closedByEmployeeId: emp?.id || 'SYSTEM',
-      closedByEmployeeName: emp?.name || 'Manager',
-      totalCash: Number(this.totalDailyCashInVaults().toFixed(2)),
-      totalCard: Number(this.totalDailyCardInVaults().toFixed(2)),
-      totalGrossRevenue: vat.totalGross,
-      net13: vat.net13,
-      vat13: vat.vat13,
-      net24: vat.net24,
-      vat24: vat.vat24,
-      totalNetRevenue: vat.totalNet,
-      totalVatLiability: vat.totalVat
-    };
+public closeDayAndGenerateZReport(): DailyZReportSnapshot {
+  const emp = this.currentEmployee();
+  const { tenantId, storeId } = this.getActiveTenantAndStore();
+  const vat = this.vatBreakdown();
+  const todayStr = new Date().toLocaleDateString('el-GR');
 
-    if (this.db) {
-      setDoc(doc(this.db, 'z_reports', snapshot.id), cleanUndefined(snapshot)).catch(() => {});
-    }
+  // Strict: Calculate totals strictly from settled sales and CLOSED vaults of today
+  const snapshot: DailyZReportSnapshot = {
+    id: `Z-REPORT-${Date.now()}`,
+    tenantId: emp?.tenantId || tenantId,
+    storeId: emp?.storeId || storeId,
+    dateStr: todayStr,
+    timestamp: new Date().toISOString(),
+    closedByEmployeeId: emp?.id || 'SYSTEM',
+    closedByEmployeeName: emp?.name || 'Manager',
+    totalCash: Number(this.allVaultSessions().filter(v => v.status === 'CLOSED').reduce((acc, v) => acc + (v.cashCollected || 0), 0).toFixed(2)),
+    totalCard: Number(this.allVaultSessions().filter(v => v.status === 'CLOSED').reduce((acc, v) => acc + (v.cardCollected || 0), 0).toFixed(2)),
+    totalGrossRevenue: vat.totalGross,
+    net13: vat.net13,
+    vat13: vat.vat13,
+    net24: vat.net24,
+    vat24: vat.vat24,
+    totalNetRevenue: vat.totalNet,
+    totalVatLiability: vat.totalVat
+  };
 
-    this.zReports.update(list => [snapshot, ...list]);
-    this.logAudit('Z_REPORT_CLOSED', `Έκδοση Z-Report & Κλείσιμο Ημέρας. Σύνολο Τζίρου: €${snapshot.totalGrossRevenue.toFixed(2)}`);
-
-    return snapshot;
+  if (this.db) {
+    setDoc(doc(this.db, 'z_reports', snapshot.id), cleanUndefined(snapshot)).catch(() => {});
   }
+
+  this.zReports.update(list => [snapshot, ...list]);
+  this.logAudit('Z_REPORT_CLOSED', `Έκδοση Z-Report. Σύνολο Τζίρου: €${snapshot.totalGrossRevenue.toFixed(2)}`);
+
+  // NOTE: We intentionally DO NOT close activeVaultSessions() here so waiters currently on shift are not interrupted.
+  return snapshot;
+}
 
   public async resetDatabaseToDefaults(): Promise<void> {
     if (!this.db) return;

@@ -1,3 +1,5 @@
+// src/app/features/floor-plan/floor-plan.component.ts
+
 import { Component, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { VaultClosureModalComponent } from '../staff/components/vault-closure-modal/vault-closure-modal.component';
@@ -127,13 +129,10 @@ export class FloorPlanComponent {
     }
   }
 
-  // --- OPTION 1 STRICT PAYMENT CHECK ---
-  // --- OPTION 1 STRICT PAYMENT CHECK ---
   public processPayment(tableId: string, method: 'CASH' | 'CARD'): void {
     const table = this.posService.tables().find(t => t.id === tableId);
     const activeOrder = table?.activeOrder;
 
-    // 1. STRICT PREVENTION: Check for unsent items (items with 'PENDING' status)
     if (activeOrder && activeOrder.items) {
       const unsentItems = activeOrder.items.filter(
         item => item.status === 'PENDING'
@@ -143,16 +142,16 @@ export class FloorPlanComponent {
         alert(
           `⚠️ Υπάρχουν ${unsentItems.length} προϊόντα που δεν έχουν σταλεί στην κουζίνα!\n\nΠαρακαλώ στείλτε την παραγγελία στην κουζίνα ή διαγράψτε τα εκκρεμή προϊόντα πριν την εξόφληση.`
         );
-        return; // Stop settlement
+        return;
       }
     }
 
-    // 2. Manager vs Waiter Vault Routing
     const currentEmp = this.posService.currentEmployee();
     const myVault = this.posService.activeVaultSession();
     const activeVaults = this.posService.activeVaultSessions();
+    const isManagerRole = ['MANAGER', 'ADMIN', 'OWNER'].includes(String(currentEmp?.role || '').toUpperCase());
 
-    if (!myVault && currentEmp?.role === 'MANAGER' && activeVaults.length > 0) {
+    if (!myVault && isManagerRole && activeVaults.length > 0) {
       const selectedVaultId = this.promptSelectActiveWaiterVault(activeVaults);
       if (selectedVaultId) {
         this.posService.settleTablePayment(tableId, method, selectedVaultId);
@@ -160,7 +159,6 @@ export class FloorPlanComponent {
       return;
     }
 
-    // 3. Normal settlement
     this.posService.settleTablePayment(tableId, method);
   }
 
@@ -175,7 +173,7 @@ export class FloorPlanComponent {
     }
 
     const vaultListText = activeVaults
-      .map((v, index) => `${index + 1}. ${v.waiterName} (Μετρητά: €${v.cashCollected.toFixed(2)})`)
+      .map((v, index) => `${index + 1}. ${v.waiterName} (Μετρητά: €${(v.cashCollected || 0).toFixed(2)})`)
       .join('\n');
 
     const input = prompt(
@@ -192,29 +190,25 @@ export class FloorPlanComponent {
     return null;
   }
 
-  // Trigger method (e.g. from a header button or vault selector)
-public openVaultClosure(vault: WaiterVaultSession): void {
-  this.closingVault.set(vault);
-}
-
-// Complete the closure via POS service
-public handleShiftClosure(event: { vaultId: string; countedCash: number; discrepancy: number }): void {
-  const currentVault = this.closingVault();
-
-  if (currentVault) {
-    // 1. Create a complete WaiterVaultSession object with updated status
-    const updatedVault: WaiterVaultSession = {
-      ...currentVault,
-      status: 'CLOSED',
-      closedAt: new Date().toISOString()
-    };
-
-    // 2. Pass the full WaiterVaultSession object to your service
-    this.posService.closeWaiterVaultSession(updatedVault);
+  public openVaultClosure(vault: WaiterVaultSession): void {
+    this.closingVault.set(vault);
   }
 
-  // 3. Close the modal
-  this.closingVault.set(null);
-}
+  public handleShiftClosure(event: { vaultId: string; countedCash: number; discrepancy: number }): void {
+    const currentVault = this.closingVault();
 
+    if (currentVault) {
+      const updatedVault: WaiterVaultSession = {
+        ...currentVault,
+        status: 'CLOSED',
+        closedAt: new Date().toISOString(),
+        cashHandedOver: event.countedCash,
+        cashVariance: event.discrepancy
+      };
+
+      this.posService.closeWaiterVaultSession(updatedVault);
+    }
+
+    this.closingVault.set(null);
+  }
 }
