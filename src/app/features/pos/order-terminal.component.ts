@@ -309,17 +309,28 @@ export class OrderTerminalComponent implements OnInit {
       this.posService.updateOrderNotes(tableId, notes);
     }
   }
-
+  
   public async settlePayment(method: 'CASH' | 'CARD'): Promise<void> {
     const tableId = this.activeTableId();
     if (!tableId) return;
 
-    // 1. If there are pending items in cart, auto-send them first so receipt & KDS stay intact
+    // ⛔ STRICT GUARD: Block settlement if items haven't been sent to the kitchen/bar
     if (this.hasPendingItems()) {
-      this.posService.sendOrderToKitchen(tableId);
+      alert(
+        `⛔ ΑΠΑΓΟΡΕΥΕΤΑΙ Η ΕΞΟΦΛΗΣΗ!\n\n` +
+        `Υπάρχουν ${this.pendingItemsCount()} προϊόντα που δεν έχουν σταλεί στην κουζίνα / bar.\n` +
+        `Παρακαλώ πατήστε πρώτα "Αποστολή" στην κουζίνα πριν την είσπραξη!`
+      );
+      return;
     }
 
-    // 2. Settle payment and route to floor plan
+    const table = this.activeTable();
+    const activeItems = (table?.activeOrder?.items || []).filter(i => i.status !== 'VOIDED');
+    if (activeItems.length === 0) {
+      alert('⚠️ Δεν υπάρχουν ενεργά προϊόντα στο τραπέζι για εξόφληση.');
+      return;
+    }
+
     try {
       await this.posService.settleTablePayment(tableId, method);
     } catch (err) {

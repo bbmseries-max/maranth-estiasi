@@ -207,16 +207,25 @@
         @if ((activeTable()?.activeOrder?.grandTotal || 0) > 0) {
           <div class="flex flex-col gap-2 mt-2 pt-2 border-t border-slate-700">
             <div class="grid grid-cols-2 gap-2">
-              <button (click)="settlePayment('CASH')"
-                      class="py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-black text-white text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-1 cursor-pointer">
-                <span>💵</span>
-                <span>Μετρητά</span>
-              </button>
-              <button (click)="settlePayment('CARD')"
-                      class="py-3 rounded-xl bg-sky-600 hover:bg-sky-500 font-black text-white text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-1 cursor-pointer">
-                <span>💳</span>
-                <span>Κάρτα</span>
-              </button>
+              <!-- Cash Payment Button -->
+<button (click)="settlePayment('CASH')"
+        [disabled]="hasPendingItems() || activeItemsCount() === 0"
+        class="flex-1 py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-black text-xs uppercase tracking-wider transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center gap-1.5">
+  <span>💵</span>
+  <span>Μετρητά</span>
+</button>
+@if (hasPendingItems()) {
+  <div class="bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold p-2.5 rounded-xl text-center animate-pulse">
+    ⚠️ Πατήστε "Αποστολή" στην Κουζίνα για να ενεργοποιηθεί η πληρωμή!
+  </div>
+}
+<!-- Card Payment Button -->
+<button (click)="settlePayment('CARD')"
+        [disabled]="hasPendingItems() || activeItemsCount() === 0"
+        class="flex-1 py-3.5 px-4 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs uppercase tracking-wider transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center gap-1.5">
+  <span>💳</span>
+  <span>Κάρτα POS</span>
+</button>
             </div>
             
             <button (click)="printBill()"
