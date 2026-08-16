@@ -19,7 +19,7 @@ export type TableVisualStatus = 'FREE' | 'PENDING' | 'PREPARING' | 'READY_TO_SER
 })
 export class FloorPlanComponent {
   public posService = inject(RestaurantPosService);
-  public router = inject(Router);
+  private router = inject(Router);
 
   public closingVault = signal<WaiterVaultSession | null>(null);
   public selectedZone = signal<string>('ALL');
@@ -156,7 +156,7 @@ public getTableVisualStatus(table: RestaurantTable): TableVisualStatus {
     }
   }
 
-  public processPayment(tableId: string, method: 'CASH' | 'CARD', event?: Event): void {
+ public async processPayment(tableId: string, method: 'CASH' | 'CARD', event?: Event): Promise<void> {
     if (event) {
       event.stopPropagation();
       event.stopImmediatePropagation();
@@ -178,15 +178,21 @@ public getTableVisualStatus(table: RestaurantTable): TableVisualStatus {
     const activeVaults = this.posService.activeVaultSessions();
     const isManagerRole = ['MANAGER', 'ADMIN', 'OWNER'].includes(String(currentEmp?.role || '').toUpperCase());
 
+    // 1. Vault resolution for Managers
     if (!myVault && isManagerRole && activeVaults.length > 0) {
       const selectedVaultId = this.promptSelectActiveWaiterVault(activeVaults);
       if (selectedVaultId) {
-        this.posService.settleTablePayment(tableId, method, selectedVaultId);
+        await this.posService.settleTablePayment(tableId, method, selectedVaultId);
+        this.router.navigate(['/floor-plan'], { replaceUrl: true });
       }
       return;
     }
 
-    this.posService.settleTablePayment(tableId, method);
+    // 2. Standard Settlement
+    await this.posService.settleTablePayment(tableId, method);
+
+    // 3. Return to floor plan
+    this.router.navigate(['/floor-plan'], { replaceUrl: true });
   }
 
   private promptSelectActiveWaiterVault(activeVaults: WaiterVaultSession[]): string | null {
