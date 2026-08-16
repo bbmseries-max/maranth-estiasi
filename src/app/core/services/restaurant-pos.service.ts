@@ -409,13 +409,17 @@ export class RestaurantPosService {
   }
 
   public logoutEmployee(): void {
+    // 1. Clear in-memory signals
     this.authShiftService.currentEmployee.set(null);
     this.authShiftService.activeWorkShift.set(null);
     this.activeVaultSession.set(null);
     
+    // 2. Clear all storage keys
     localStorage.removeItem('current_employee');
     localStorage.removeItem('maranth_pos_employee');
+    sessionStorage.removeItem('current_employee');
 
+    // 3. Navigate to login
     this.router.navigate(['/login'], { replaceUrl: true });
   }
 

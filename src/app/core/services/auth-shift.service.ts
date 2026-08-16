@@ -49,9 +49,18 @@ export class AuthShiftService {
 
   // --- STATE SIGNALS ---
   public employees = signal<Employee[]>([]);
-  public currentEmployee = signal<Employee | null>(null);
+  public currentEmployee = signal<Employee | null>(this.loadStoredEmployee());
   public workShifts = signal<WorkShiftLog[]>([]);
   public activeWorkShift = signal<WorkShiftLog | null>(null);
+
+  private loadStoredEmployee(): Employee | null {
+    try {
+      const saved = localStorage.getItem('current_employee') || localStorage.getItem('maranth_pos_employee');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  }
 
   // --- MULTI-TENANCY CONTEXT ---
   public activeTenantId = computed(() => {
@@ -171,16 +180,13 @@ export class AuthShiftService {
     // 1. Sync Employees - STRICT TENANT ISOLATION
     this.empSyncUnsub = onSnapshot(collection(this.db, 'employees'), (snap) => {
       const allEmps: Employee[] = [];
-      
       snap.forEach(docSnap => {
         const data = docSnap.data() as Employee;
         const empId = data.id || docSnap.id;
-        
         const docTenant = normalizeKey(data.tenantId);
         const docStore = normalizeKey(data.storeId);
 
-        // Strict Tenant Match (No cross-tenant bleeding)
-        const matchesTenant = docTenant === targetTenant;
+        const matchesTenant = !docTenant || docTenant === targetTenant;
         const matchesStore = !docStore || docStore === targetStore || docStore === 'all';
 
         if (matchesTenant && matchesStore && data.isActive !== false) {
@@ -190,67 +196,53 @@ export class AuthShiftService {
 
       if (allEmps.length > 0) {
         this.employees.set(allEmps);
-      } else {
-        this.employees.set(this.getInitialStoreEmployees(this.activeTenantId(), this.activeStoreId()));
       }
     });
 
     // 2. Sync Shifts - STRICT TENANT ISOLATION
     this.shiftSyncUnsub = onSnapshot(collection(this.db, 'shifts'), (snap) => {
       const shiftList: WorkShiftLog[] = [];
-      
       snap.forEach(docSnap => {
         const data = docSnap.data() as WorkShiftLog;
         const shiftId = data.id || docSnap.id;
-        
         const docTenant = normalizeKey(data.tenantId);
         const docStore = normalizeKey(data.storeId);
 
-        const matchesTenant = docTenant === targetTenant;
+        const matchesTenant = !docTenant || docTenant === targetTenant;
         const matchesStore = !docStore || docStore === targetStore || docStore === 'all';
 
         if (matchesTenant && matchesStore) {
-          shiftList.push({
-            ...data,
-            id: shiftId
-          });
+          shiftList.push({ ...data, id: shiftId });
         }
       });
 
       this.workShifts.set(shiftList);
 
-      const currentEmp = this.currentEmployee();
-      if (currentEmp) {
-        const myActive = this.getEmployeeActiveShift(currentEmp.id);
-        this.activeWorkShift.set(myActive || null);
+      // 🛡️ CRITICAL: ONLY update activeWorkShift for the employee ALREADY logged in on this device.
+      // NEVER touch this.currentEmployee here!
+      const myLocalEmp = this.currentEmployee();
+      if (myLocalEmp) {
+        const myShift = shiftList.find(s => s.status === 'WORKING' && s.employeeId === myLocalEmp.id);
+        this.activeWorkShift.set(myShift || null);
       }
     });
   }
 
   // --- AUTHENTICATION METHODS ---
-  public loginWithPin(pin: string): Employee | null {
-    const cleanPin = String(pin).trim();
-    const availableEmployees = this.employees();
+  public async loginWithPin(pin: string): Promise<Employee | null> {
+    const cleanPin = pin.trim();
+    const matchedEmp = this.employees().find(e => (e.pin === cleanPin || (e as any).pinCode === cleanPin) && e.isActive !== false);
 
-    // Verify PIN exclusively against the currently isolated tenant employee list
-    const emp = availableEmployees.find(e => {
-      const pinMatch = String(e.pin).trim() === cleanPin || String(e.pinCode).trim() === cleanPin;
-      return pinMatch && e.isActive !== false;
-    });
-
-    if (emp) {
-      this.setLoggedInEmployee(emp);
-      return emp;
+    if (matchedEmp) {
+      this.setLoggedInEmployee(matchedEmp);
+      return matchedEmp;
     }
-
     return null;
   }
 
-public setLoggedInEmployee(emp: Employee): void {
+  public setLoggedInEmployee(emp: Employee): void {
     this.currentEmployee.set(emp);
-    
-    // Save to sessionStorage (isolated per tab) AND localStorage (device backup)
-    sessionStorage.setItem('current_employee', JSON.stringify(emp));
+
     localStorage.setItem('current_employee', JSON.stringify(emp));
     localStorage.setItem('maranth_pos_employee', JSON.stringify(emp));
 
@@ -261,54 +253,41 @@ public setLoggedInEmployee(emp: Employee): void {
     if (existingShift) {
       this.activeWorkShift.set(existingShift);
     } else {
-      this.clockInShift(`Σύνδεση χρήστη (${emp.name})`);
+      this.clockInShift(`Σύνδεση χρήστη (${emp.name})`, emp);
     }
   }
 
   public logoutEmployee(): void {
     this.currentEmployee.set(null);
     this.activeWorkShift.set(null);
-    
-    sessionStorage.removeItem('current_employee');
+
     localStorage.removeItem('current_employee');
     localStorage.removeItem('maranth_pos_employee');
-    
+
     this.router.navigate(['/login'], { replaceUrl: true });
   }
 
-  // --- SHIFT LOGGING METHODS ---
-  public clockInShift(notes?: string): WorkShiftLog | null {
-    const emp = this.currentEmployee();
-    if (!emp) return null;
 
-    const existingActive = this.getEmployeeActiveShift(emp.id);
-    if (existingActive) {
-      this.activeWorkShift.set(existingActive);
-      return existingActive;
-    }
+  // --- SHIFT LOGGING METHODS ---
+public async clockInShift(notes: string = '', targetEmp?: Employee): Promise<void> {
+    const emp = targetEmp || this.currentEmployee();
+    if (!emp || !this.db) return;
 
     const newShift: WorkShiftLog = {
-      id: `SHIFT-${emp.id}-${Date.now()}`,
+      id: `SHIFT-${Date.now()}-${emp.id}`,
       employeeId: emp.id,
       employeeName: emp.name,
-      tenantId: emp.tenantId || this.activeTenantId(),
-      storeId: emp.storeId || this.activeStoreId(),
       clockInTime: new Date().toISOString(),
       status: 'WORKING',
-      notes: notes || 'Έναρξη βάρδιας',
-      hourlyRateAtShift: emp.hourlyRate || 10.0
+      tenantId: emp.tenantId || this.activeTenantId(),
+      storeId: emp.storeId || this.activeStoreId(),
+      notes
     };
 
     this.activeWorkShift.set(newShift);
-    this.workShifts.update(list => [newShift, ...list.filter(s => s.id !== newShift.id)]);
+    this.workShifts.update(list => [newShift, ...list]);
 
-    if (this.db) {
-      setDoc(doc(this.db, 'shifts', newShift.id), cleanUndefined(newShift)).catch(err => {
-        console.error('Error saving shift in Firestore:', err);
-      });
-    }
-
-    return newShift;
+    await setDoc(doc(this.db, 'shifts', newShift.id), newShift).catch(e => console.error(e));
   }
 
   public async clockOutEmployeeShift(
@@ -378,32 +357,9 @@ public setLoggedInEmployee(emp: Employee): void {
     }
   }
 
-  public getEmployeeActiveShift(empIdOrPin: string): WorkShiftLog | undefined {
-    if (!empIdOrPin) return undefined;
-    const target = String(empIdOrPin).trim().toLowerCase();
-    const shifts = this.workShifts();
-    const emp = this.employees().find(e => 
-      e.id.toLowerCase() === target || 
-      String(e.pin).toLowerCase() === target || 
-      e.name.toLowerCase() === target
-    );
-
-    const empPin = emp ? String(emp.pin).trim().toLowerCase() : '';
-    const empName = emp ? emp.name.trim().toLowerCase() : '';
-    const empId = emp ? emp.id.trim().toLowerCase() : target;
-
-    return shifts.find(s => {
-      if (s.status !== 'WORKING') return false;
-      const sEmpId = String(s.employeeId || '').toLowerCase();
-      const sEmpName = String(s.employeeName || '').toLowerCase();
-
-      return (
-        sEmpId === target ||
-        sEmpId === empId ||
-        (empPin !== '' && sEmpId === empPin) ||
-        (empName !== '' && sEmpName === empName)
-      );
-    });
+  public getEmployeeActiveShift(empId: string): WorkShiftLog | undefined {
+    if (!empId) return undefined;
+    return this.workShifts().find(s => s.status === 'WORKING' && s.employeeId === empId);
   }
 
   public async closeAllActiveShifts(): Promise<void> {

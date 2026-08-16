@@ -11,20 +11,15 @@ export const roleGuard: CanActivateFn = (route, state) => {
   const authShiftService = inject(AuthShiftService);
   const router = inject(Router);
 
-  // 1. Check in-memory state first
+  // 1. Get current employee from memory
   let emp: Employee | null = authShiftService.currentEmployee() || posService.currentEmployee();
 
-  // 2. Fallback to tab-isolated sessionStorage, then localStorage
+  // 2. If memory is empty on fresh page reload, restore from local storage
   if (!emp) {
     try {
-      const savedEmp = 
-        sessionStorage.getItem('current_employee') || 
-        localStorage.getItem('current_employee') || 
-        localStorage.getItem('maranth_pos_employee');
-
+      const savedEmp = localStorage.getItem('current_employee') || localStorage.getItem('maranth_pos_employee');
       if (savedEmp) {
-        const parsed: Employee = JSON.parse(savedEmp);
-        emp = parsed;
+        emp = JSON.parse(savedEmp);
         authShiftService.currentEmployee.set(emp);
         posService.currentEmployee.set(emp);
       }
@@ -33,7 +28,7 @@ export const roleGuard: CanActivateFn = (route, state) => {
     }
   }
 
-  // 3. If still no active user, send to login
+  // 3. Not logged in -> strictly redirect to /login
   if (!emp) {
     return router.createUrlTree(['/login']);
   }
@@ -42,22 +37,20 @@ export const roleGuard: CanActivateFn = (route, state) => {
   if (userRole === 'BAR' || userRole === 'BARMAN') userRole = 'BARISTA';
   if (userRole === 'CHEF') userRole = 'KITCHEN';
 
-  // 4. Managers have global access
+  // 4. Managers have universal access across all routes
   if (['ADMIN', 'MANAGER', 'OWNER'].includes(userRole)) {
     return true;
   }
 
-  // 5. Check allowed roles for route
+  // 5. Check route allowed roles
   const allowedRoles = (route.data?.['roles'] as string[] | undefined)?.map(r => r.toUpperCase().trim()) || [];
-  
   if (allowedRoles.length === 0 || allowedRoles.includes(userRole)) {
     return true;
   }
 
-  // 6. Access Denied: redirect to the employee's default view
+  // 6. Role mismatch: send to default allowed area (never hijack Manager)
   if (userRole === 'KITCHEN' || userRole === 'BARISTA') {
     return router.createUrlTree(['/kitchen']);
   }
-  
   return router.createUrlTree(['/floor-plan']);
 };
