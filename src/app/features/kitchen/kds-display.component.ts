@@ -18,6 +18,13 @@ interface KitchenTicket {
   items: TableOrderItem[];
 }
 
+export interface VoidNotificationItem {
+  id: string;
+  tableNumber: number | string;
+  itemName: string;
+  reason: string;
+}
+
 @Component({
   selector: 'app-kds-display',
   standalone: true,
@@ -26,6 +33,25 @@ interface KitchenTicket {
   template: `
     <div class="min-h-screen bg-slate-950 p-4 text-slate-100 font-sans select-none relative">
       
+
+    <!-- FLOATING VOID NOTIFICATION BANNERS -->
+@if (voidNotifications().length > 0) {
+  <div class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-auto">
+    @for (alert of voidNotifications(); track alert.id) {
+      <div class="p-4 rounded-2xl bg-rose-950/95 border-2 border-rose-500 text-white shadow-2xl flex items-center justify-between gap-3 animate-bounce">
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">🚨</span>
+          <div>
+            <span class="font-black text-xs text-rose-300 block">ΑΚΥΡΩΣΗ - Τραπέζι #{{ alert.tableNumber }}</span>
+            <span class="font-bold text-sm block">{{ alert.itemName }}</span>
+            <span class="text-[11px] text-slate-300">{{ alert.reason }}</span>
+          </div>
+        </div>
+        <button (click)="dismissVoidNotification(alert.id)" class="text-slate-400 hover:text-white text-lg p-1">✕</button>
+      </div>
+    }
+  </div>
+}
       <!-- VOID ALERTS OVERLAY -->
       @if (activeVoidAlerts().length > 0) {
         <div class="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-full max-w-lg px-4">
@@ -172,6 +198,8 @@ interface KitchenTicket {
   `
 })
 export class KdsDisplayComponent implements OnInit, OnDestroy {
+  // 🔔 1. Declare the signal to store active void alerts
+  public voidNotifications = signal<VoidNotificationItem[]>([]);
   public posService = inject(RestaurantPosService);
   public stationFilter = signal<'ALL' | 'BAR' | 'KITCHEN'>('ALL');
   public now = signal<number>(Date.now());
@@ -305,6 +333,16 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
     this.timerInterval = setInterval(() => {
       this.now.set(Date.now());
     }, 10000);
+
+    // Unlocks browser audio on first tap/click anywhere on the kitchen screen
+    const unlockAudio = () => {
+      this.getAudioContext();
+      window.removeEventListener('click', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
+    };
+
+    window.addEventListener('click', unlockAudio, { once: true });
+    window.addEventListener('touchstart', unlockAudio, { once: true });
   }
 
   ngOnDestroy(): void {
@@ -362,16 +400,87 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
     }
   }
 
-  public handleVoidNotification(voidData: { id: string; tableNumber: number; itemName: string; reason?: string }): void {
-    try {
-      const audio = new Audio('assets/sounds/void-alert.mp3');
-      audio.play().catch(() => {});
-    } catch (e) {}
-
-    this.activeVoidAlerts.update(alerts => [voidData, ...alerts]);
-  }
-
   public acknowledgeVoid(alertId: string): void {
     this.activeVoidAlerts.update(alerts => alerts.filter(a => a.id !== alertId));
+  }
+
+  // 🔊 Audio context reference
+  private audioCtx: AudioContext | null = null;
+
+  /**
+   * Initializes / resumes AudioContext on user interaction to bypass autoplay restrictions
+   */
+  private getAudioContext(): AudioContext | null {
+    try {
+      if (!this.audioCtx) {
+        const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+        this.audioCtx = new AudioCtxClass();
+      }
+      if (this.audioCtx.state === 'suspended') {
+        this.audioCtx.resume();
+      }
+      return this.audioCtx;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Generates a 2-tone kitchen warning alert (880 Hz -> 440 Hz)
+   */
+  public playVoidAlertSound(): void {
+    const ctx = this.getAudioContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+
+      // Tone 1: High Warning Beep (880 Hz - Sine wave)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(880, now);
+      gain1.gain.setValueAtTime(0.3, now);
+      gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+      
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.25);
+
+      // Tone 2: Drop Urgent Alert (440 Hz - Sawtooth wave)
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sawtooth';
+      osc2.frequency.setValueAtTime(440, now + 0.2);
+      gain2.gain.setValueAtTime(0.25, now + 0.2);
+      gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+      
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.2);
+      osc2.stop(now + 0.6);
+    } catch (err) {
+      console.warn('Audio playback was blocked or failed:', err);
+    }
+  }
+
+  // 🔊 2. Dismiss handler to remove an alert banner
+  public dismissVoidNotification(id: string): void {
+    this.voidNotifications.update(list => list.filter(n => n.id !== id));
+  }
+
+  // 3. Your updated handler:
+  private handleVoidNotification(notification: VoidNotificationItem): void {
+    // Play the chime
+    this.playVoidAlertSound();
+
+    // Add to alerts signal
+    this.voidNotifications.update(list => [notification, ...list]);
+
+    // Auto-dismiss banner after 8 seconds
+    setTimeout(() => {
+      this.dismissVoidNotification(notification.id);
+    }, 8000);
   }
 }
