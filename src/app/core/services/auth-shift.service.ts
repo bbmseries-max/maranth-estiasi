@@ -56,17 +56,17 @@ export class AuthShiftService {
   // --- MULTI-TENANCY CONTEXT ---
   public activeTenantId = computed(() => {
     return (
-      localStorage.getItem('active_tenant_id') || 
       this.currentEmployee()?.tenantId || 
+      localStorage.getItem('active_tenant_id') || 
       (this.tenantContext as any)?.currentTenantId?.() || 
       'coffee-shop-demo'
     );
   });
 
-  public activeStoreId = computed(() => {
+ public activeStoreId = computed(() => {
     return (
-      localStorage.getItem('active_store_id') || 
       this.currentEmployee()?.storeId || 
+      localStorage.getItem('active_store_id') || 
       (this.tenantContext as any)?.currentStoreId?.() || 
       'store-1'
     );
@@ -250,6 +250,14 @@ export class AuthShiftService {
     this.currentEmployee.set(emp);
     localStorage.setItem('current_employee', JSON.stringify(emp));
     localStorage.setItem('maranth_pos_employee', JSON.stringify(emp));
+
+    // Save active tenant & store so POS services query the right database slice
+    if (emp.tenantId) {
+      localStorage.setItem('active_tenant_id', emp.tenantId);
+    }
+    if (emp.storeId) {
+      localStorage.setItem('active_store_id', emp.storeId);
+    }
 
     const existingShift = this.getEmployeeActiveShift(emp.id);
 
