@@ -662,7 +662,7 @@ export class TableOrderService {
     }
   }
 
-  public async settleTablePayment(
+ public async settleTablePayment(
     tableId: string, 
     paymentMethod: 'CASH' | 'CARD' | 'DEBT', 
     currentEmp: Employee | null, 
@@ -725,32 +725,39 @@ export class TableOrderService {
 
     onPaymentSuccessFn(saleRecord);
 
-    const freedTable: Table = {
-      ...table,
-      status: 'FREE',
+    // 🛡️ Explicit clean state object: null out all order properties
+    const cleanFreedTableData = {
+      id: table.id,
+      number: table.number || table.tableNumber || 1,
+      tableNumber: table.number || table.tableNumber || 1,
+      name: table.name || `Τραπέζι ${table.number || table.tableNumber}`,
+      seats: table.seats || table.capacity || 4,
+      capacity: table.seats || table.capacity || 4,
+      section: table.section || 'INDOOR',
+      zone: table.zone || 'Σάλα',
+      tenantId: table.tenantId || tenantId,
+      storeId: table.storeId || storeId,
+      status: 'FREE' as const,
       currentTotal: 0,
-      activeOrder: undefined,
-      activeOrderId: undefined,
-      waiterId: undefined,
-      assignedWaiterId: undefined,
-      waiterName: undefined,
-      assignedWaiterName: undefined
+      activeOrder: null,
+      activeOrderId: null,
+      waiterId: null,
+      waiterName: null,
+      assignedWaiterId: null,
+      assignedWaiterName: null
     };
 
-    const updatedTables = this.tables().map(t => t.id === table.id ? freedTable : t);
+    // Update local Signal
+    const updatedTables = this.tables().map(t => t.id === table.id ? (cleanFreedTableData as any) : t);
     this.tables.set(updatedTables);
 
+    // 🛡️ Direct Firestore overwrite (DO NOT merge with old order fields)
     if (this.db) {
       try {
-        await setDoc(doc(this.db, 'tables', table.id), safeFirestorePayload({
-          ...freedTable,
-          activeOrder: deleteField(),
-          waiterId: deleteField(),
-          waiterName: deleteField(),
-          assignedWaiterId: deleteField(),
-          assignedWaiterName: deleteField()
-        }), { merge: true });
-      } catch (e) { console.error(e); }
+        await setDoc(doc(this.db, 'tables', table.id), cleanFreedTableData);
+      } catch (e) {
+        console.error('🔥 Error clearing table in Firestore:', e);
+      }
     }
 
     this.router.navigate(['/floor-plan']);
