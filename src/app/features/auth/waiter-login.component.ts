@@ -38,21 +38,13 @@ export class WaiterLoginComponent implements OnInit {
   // Active Store Info computed from License
   public activeShop = computed(() => this.deviceService.currentLicense());
 
-  ngOnInit(): void {
+ ngOnInit(): void {
     this.enteredPin.set('');
     this.errorMessage.set('');
     this.supportsBiometrics = !!(window.PublicKeyCredential);
 
-    // 1. Check device pairing
     if (!this.deviceService.isDevicePaired()) {
       this.step.set('DEVICE_SETUP');
-      return;
-    }
-
-    // 2. Check active user session
-    const emp = this.posService.currentEmployee() || this.authShiftService.currentEmployee();
-    if (emp) {
-      this.redirectByRole(emp.role);
     } else {
       this.step.set('PIN_ENTRY');
     }
@@ -147,9 +139,11 @@ export class WaiterLoginComponent implements OnInit {
     this.step.set('PIN_ENTRY');
   }
 
-  public startShiftAndVault(): void {
+  public startShiftAndVault(selectedEmp?: Employee): void {
     const floatAmount = Number(this.startingFloat) >= 0 ? Number(this.startingFloat) : 0;
-    const emp = this.posService.currentEmployee();
+    
+    // Prefer the explicitly selected/authenticated employee on THIS device
+    const emp = selectedEmp || this.posService.currentEmployee();
     
     if (emp) {
       this.posService.setLoggedInEmployee(emp, floatAmount);
@@ -160,9 +154,11 @@ export class WaiterLoginComponent implements OnInit {
   }
 
   private redirectByRole(role?: string): void {
-    const r = role?.toUpperCase() || '';
-    if (r === 'KITCHEN') {
+    const r = (role || '').toUpperCase();
+    if (r === 'KITCHEN' || r === 'CHEF') {
       this.router.navigate(['/kitchen'], { replaceUrl: true });
+    } else if (r === 'BAR' || r === 'BARISTA' || r === 'BARMAN') {
+      this.router.navigate(['/kitchen'], { replaceUrl: true }); // or /bar if separate
     } else {
       this.router.navigate(['/floor-plan'], { replaceUrl: true });
     }

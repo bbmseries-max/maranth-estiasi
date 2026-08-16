@@ -246,21 +246,18 @@ export class AuthShiftService {
     return null;
   }
 
-  public setLoggedInEmployee(emp: Employee): void {
+public setLoggedInEmployee(emp: Employee): void {
     this.currentEmployee.set(emp);
+    
+    // Save to sessionStorage (isolated per tab) AND localStorage (device backup)
+    sessionStorage.setItem('current_employee', JSON.stringify(emp));
     localStorage.setItem('current_employee', JSON.stringify(emp));
     localStorage.setItem('maranth_pos_employee', JSON.stringify(emp));
 
-    // Save active tenant & store so POS services query the right database slice
-    if (emp.tenantId) {
-      localStorage.setItem('active_tenant_id', emp.tenantId);
-    }
-    if (emp.storeId) {
-      localStorage.setItem('active_store_id', emp.storeId);
-    }
+    if (emp.tenantId) localStorage.setItem('active_tenant_id', emp.tenantId);
+    if (emp.storeId) localStorage.setItem('active_store_id', emp.storeId);
 
     const existingShift = this.getEmployeeActiveShift(emp.id);
-
     if (existingShift) {
       this.activeWorkShift.set(existingShift);
     } else {
@@ -271,9 +268,12 @@ export class AuthShiftService {
   public logoutEmployee(): void {
     this.currentEmployee.set(null);
     this.activeWorkShift.set(null);
+    
+    sessionStorage.removeItem('current_employee');
     localStorage.removeItem('current_employee');
     localStorage.removeItem('maranth_pos_employee');
-    this.router.navigate(['/login']);
+    
+    this.router.navigate(['/login'], { replaceUrl: true });
   }
 
   // --- SHIFT LOGGING METHODS ---

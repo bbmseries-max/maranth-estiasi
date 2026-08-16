@@ -760,8 +760,6 @@ export class TableOrderService {
         console.error('🔥 Error clearing table in Firestore:', e);
       }
     }
-
-    this.router.navigate(['/floor-plan']);
   }
 
   public async reserveTable(tableId: string, info: TableReservationInfo): Promise<void> {
