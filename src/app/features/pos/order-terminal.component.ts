@@ -336,6 +336,7 @@ export class OrderTerminalComponent implements OnInit {
     } catch (err) {
       console.error('Payment error:', err);
     }
+    this.router.navigate(['/floor-plan'], { replaceUrl: true });
   }
 
   public printBill(): void {
@@ -396,5 +397,6 @@ export class OrderTerminalComponent implements OnInit {
       case 'VOIDED': return 'Ακυρώθηκε';
       default: return status;
     }
+
   }
 }
