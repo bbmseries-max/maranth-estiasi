@@ -19,9 +19,9 @@ export type TableVisualStatus = 'FREE' | 'PENDING' | 'PREPARING' | 'READY_TO_SER
 })
 export class FloorPlanComponent {
   public posService = inject(RestaurantPosService);
-  public closingVault = signal<WaiterVaultSession | null>(null);
   public router = inject(Router);
 
+  public closingVault = signal<WaiterVaultSession | null>(null);
   public selectedZone = signal<string>('ALL');
   public selectingVaultForSettlement = signal<{ tableId: string; method: 'CASH' | 'CARD' } | null>(null);
 
@@ -33,11 +33,25 @@ export class FloorPlanComponent {
     return all.filter(t => (t.zone === zone || t.section === zone));
   });
 
-  public onTableSelect(table: RestaurantTable): void {
+  /**
+   * Safe Table Navigation:
+   * Stops event bubbling so background DOM re-renders from other devices cannot trigger navigation.
+   */
+  public onTableSelect(table: RestaurantTable, event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    }
+    if (!table || !table.id) return;
+
     this.router.navigate(['/order', table.id]);
   }
 
-  public openTakeaway(): void {
+  public openTakeaway(event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+    }
+
     let takeawayTable = this.posService.tables().find(t => t.id === 'takeaway-counter');
     if (!takeawayTable) {
       takeawayTable = {
@@ -56,7 +70,11 @@ export class FloorPlanComponent {
     this.router.navigate(['/order', takeawayTable.id]);
   }
 
-  public handleManagerSettlement(tableId: string, method: 'CASH' | 'CARD'): void {
+  public handleManagerSettlement(tableId: string, method: 'CASH' | 'CARD', event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+    }
+
     const activeVaults = this.posService.activeVaultSessions();
 
     if (activeVaults.length === 0) {
@@ -129,10 +147,15 @@ export class FloorPlanComponent {
     }
   }
 
-  public processPayment(tableId: string, method: 'CASH' | 'CARD'): void {
+  public processPayment(tableId: string, method: 'CASH' | 'CARD', event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+    }
+
     const table = this.posService.tables().find(t => t.id === tableId);
     const activeOrder = table?.activeOrder;
 
+    // Strict Unsent Items Check
     if (activeOrder && activeOrder.items) {
       const unsentItems = activeOrder.items.filter(
         item => item.status === 'PENDING'
@@ -190,7 +213,10 @@ export class FloorPlanComponent {
     return null;
   }
 
-  public openVaultClosure(vault: WaiterVaultSession): void {
+  public openVaultClosure(vault: WaiterVaultSession, event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+    }
     this.closingVault.set(vault);
   }
 

@@ -53,20 +53,24 @@ export class AuthShiftService {
   public workShifts = signal<WorkShiftLog[]>([]);
   public activeWorkShift = signal<WorkShiftLog | null>(null);
 
-  // --- MULTI-TENANCY COMPUTATIONS ---
-  public activeTenantId = computed(() => 
-    this.currentEmployee()?.tenantId || 
-    localStorage.getItem('active_tenant_id') || 
-    (this.tenantContext as any).currentTenantId?.() || 
-    'Tirane kafe 1974'
-  );
+  // --- MULTI-TENANCY CONTEXT ---
+  public activeTenantId = computed(() => {
+    return (
+      localStorage.getItem('active_tenant_id') || 
+      this.currentEmployee()?.tenantId || 
+      (this.tenantContext as any)?.currentTenantId?.() || 
+      'coffee-shop-demo'
+    );
+  });
 
-  public activeStoreId = computed(() => 
-    this.currentEmployee()?.storeId || 
-    localStorage.getItem('active_store_id') || 
-    (this.tenantContext as any).currentStoreId?.() || 
-    'store-2'
-  );
+  public activeStoreId = computed(() => {
+    return (
+      localStorage.getItem('active_store_id') || 
+      this.currentEmployee()?.storeId || 
+      (this.tenantContext as any)?.currentStoreId?.() || 
+      'store-1'
+    );
+  });
 
   // --- ROLE SECURITY ---
   public canManageSystem = computed(() => {
@@ -83,8 +87,8 @@ export class AuthShiftService {
       const sTenant = normalizeKey(shift.tenantId);
       const sStore = normalizeKey(shift.storeId);
 
-      const matchesTenant = !sTenant || sTenant === targetTenant || sTenant.includes('tirane');
-      const matchesStore = !sStore || sStore === targetStore || sStore.includes('store2') || sStore.includes('store-2');
+      const matchesTenant = sTenant === targetTenant;
+      const matchesStore = !sStore || sStore === targetStore || sStore === 'all';
 
       return matchesTenant && matchesStore;
     });
@@ -107,38 +111,45 @@ export class AuthShiftService {
   }
 
   public getInitialStoreEmployees(tenantId: string, storeId: string): Employee[] {
+    const isDemo = normalizeKey(tenantId) === 'coffeeshopdemo';
+    
+    if (isDemo) {
+      return [
+        { 
+          id: `emp_demo_9999`, 
+          name: 'Demo Διαχειριστής (9999)', 
+          pin: '9999', 
+          pinCode: '9999', 
+          role: 'MANAGER', 
+          hourlyRate: 10.0, 
+          isActive: true, 
+          active: true, 
+          tenantId: 'coffee-shop-demo', 
+          storeId: 'store-1' 
+        },
+        { 
+          id: `emp_demo_1234`, 
+          name: 'Demo Barista (1234)', 
+          pin: '1234', 
+          pinCode: '1234', 
+          role: 'WAITER', 
+          hourlyRate: 6.5, 
+          isActive: true, 
+          active: true, 
+          tenantId: 'coffee-shop-demo', 
+          storeId: 'store-1' 
+        }
+      ];
+    }
+
     return [
       { 
-        id: `emp_9999`, 
-        name: 'Διαχειριστής (9999)', 
-        pin: '9999', 
-        pinCode: '9999', 
-        role: 'MANAGER', 
-        hourlyRate: 10.0, 
-        isActive: true, 
-        active: true, 
-        tenantId, 
-        storeId 
-      },
-      { 
-        id: `store-2_emp_1111`, 
-        name: 'Υπεύθυνος Βάρδιας (1111)', 
+        id: `emp_${normalizeKey(tenantId)}_1111`, 
+        name: 'Υπεύθυνος (1111)', 
         pin: '1111', 
         pinCode: '1111', 
         role: 'MANAGER', 
         hourlyRate: 8.5, 
-        isActive: true, 
-        active: true, 
-        tenantId, 
-        storeId 
-      },
-      { 
-        id: `emp-demo-1234`, 
-        name: 'Demo Barista', 
-        pin: '1234', 
-        pinCode: '1234', 
-        role: 'WAITER', 
-        hourlyRate: 6.5, 
         isActive: true, 
         active: true, 
         tenantId, 
@@ -157,7 +168,7 @@ export class AuthShiftService {
     const targetTenant = normalizeKey(this.activeTenantId());
     const targetStore = normalizeKey(this.activeStoreId());
 
-    // 1. Sync Employees
+    // 1. Sync Employees - STRICT TENANT ISOLATION
     this.empSyncUnsub = onSnapshot(collection(this.db, 'employees'), (snap) => {
       const allEmps: Employee[] = [];
       
@@ -168,10 +179,11 @@ export class AuthShiftService {
         const docTenant = normalizeKey(data.tenantId);
         const docStore = normalizeKey(data.storeId);
 
-        const matchesTenant = !docTenant || docTenant === targetTenant || docTenant.includes('tirane') || data.tenantId === 'ALL';
-        const matchesStore = !docStore || docStore === targetStore || docStore === 'all' || docStore.includes('store2') || docStore.includes('store-2');
+        // Strict Tenant Match (No cross-tenant bleeding)
+        const matchesTenant = docTenant === targetTenant;
+        const matchesStore = !docStore || docStore === targetStore || docStore === 'all';
 
-        if (matchesTenant && matchesStore) {
+        if (matchesTenant && matchesStore && data.isActive !== false) {
           allEmps.push({ ...data, id: empId });
         }
       });
@@ -183,7 +195,7 @@ export class AuthShiftService {
       }
     });
 
-    // 2. Sync All Shifts
+    // 2. Sync Shifts - STRICT TENANT ISOLATION
     this.shiftSyncUnsub = onSnapshot(collection(this.db, 'shifts'), (snap) => {
       const shiftList: WorkShiftLog[] = [];
       
@@ -194,8 +206,8 @@ export class AuthShiftService {
         const docTenant = normalizeKey(data.tenantId);
         const docStore = normalizeKey(data.storeId);
 
-        const matchesTenant = !docTenant || docTenant === targetTenant || docTenant.includes('tirane');
-        const matchesStore = !docStore || docStore === targetStore || docStore.includes('store2') || docStore.includes('store-2');
+        const matchesTenant = docTenant === targetTenant;
+        const matchesStore = !docStore || docStore === targetStore || docStore === 'all';
 
         if (matchesTenant && matchesStore) {
           shiftList.push({
@@ -218,29 +230,13 @@ export class AuthShiftService {
   // --- AUTHENTICATION METHODS ---
   public loginWithPin(pin: string): Employee | null {
     const cleanPin = String(pin).trim();
-    const activeTenant = normalizeKey(this.activeTenantId());
-    const activeStore = normalizeKey(this.activeStoreId());
-
     const availableEmployees = this.employees();
 
-    let emp = availableEmployees.find(e => {
+    // Verify PIN exclusively against the currently isolated tenant employee list
+    const emp = availableEmployees.find(e => {
       const pinMatch = String(e.pin).trim() === cleanPin || String(e.pinCode).trim() === cleanPin;
-      if (!pinMatch) return false;
-
-      const eTenant = normalizeKey(e.tenantId);
-      const eStore = normalizeKey(e.storeId);
-
-      const tenantMatch = !eTenant || eTenant === activeTenant || eTenant.includes('tirane');
-      const storeMatch = !eStore || eStore === activeStore || eStore === 'all' || eStore.includes('store2') || eStore.includes('store-2');
-
-      return tenantMatch && storeMatch;
+      return pinMatch && e.isActive !== false;
     });
-
-    if (!emp) {
-      emp = availableEmployees.find(e => 
-        String(e.pin).trim() === cleanPin || String(e.pinCode).trim() === cleanPin
-      );
-    }
 
     if (emp) {
       this.setLoggedInEmployee(emp);
@@ -307,8 +303,6 @@ export class AuthShiftService {
     return newShift;
   }
 
-  // In src/app/core/services/auth-shift.service.ts
-
   public async clockOutEmployeeShift(
     empIdOrPinOrName: string, 
     notes?: string,
@@ -328,7 +322,6 @@ export class AuthShiftService {
 
     const allShifts = this.workShifts();
     
-    // Match only this employee's active shift
     const matchingShifts = allShifts.filter(s => 
       s.status === 'WORKING' && 
       (
