@@ -62,9 +62,9 @@
       @for (table of filteredTables(); track table.id) {
         <div (click)="onTableSelect(table, $event)"
              [class]="getTableCardBorderClass(table)"
-             class="cursor-pointer rounded-2xl border bg-slate-900/90 p-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] flex flex-col justify-between min-h-[160px] relative shadow-lg">
+             class="cursor-pointer rounded-2xl border bg-slate-900/90 p-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] flex flex-col justify-between min-h-[175px] relative shadow-lg">
 
-          <!-- TOP ROW: TABLE NUMBER & SEATS -->
+          <!-- TOP ROW: TABLE NUMBER & SEATS / STATUS BADGE -->
           <div class="flex items-start justify-between gap-2">
             <div class="flex flex-col">
               <span class="text-xl font-black text-white leading-tight">
@@ -99,10 +99,10 @@
                   </span>
                 }
                 @case ('RESERVED') {
-                <span class="px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[10px] font-black flex items-center gap-1">
-                 📅 {{ table.reservation?.reservationTime || 'Κράτηση' }}
-                </span>
-                 }
+                  <span class="px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[10px] font-black flex items-center gap-1">
+                    📅 {{ table.reservation?.reservationTime || 'Κράτηση' }}
+                  </span>
+                }
                 @default {
                   <span class="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 text-[10px] font-bold">
                     👥 {{ table.seats || table.capacity || 4 }}
@@ -112,9 +112,9 @@
             </div>
           </div>
 
-          <!-- MIDDLE ROW: WAITER & ITEM COUNT -->
-          <div class="my-2.5">
-            @if (table.activeOrder && table.status !== 'FREE') {
+          <!-- MIDDLE ROW: OCCUPIED / RESERVED / FREE INFO -->
+          <div class="my-2">
+            @if (table.activeOrder && table.status !== 'FREE' && table.status !== 'RESERVED') {
               <div class="flex flex-col gap-0.5">
                 <span class="text-[11px] text-amber-400/90 font-medium truncate">
                   👤 {{ table.assignedWaiterName || table.waiterName || 'Σερβιτόρος' }}
@@ -123,16 +123,15 @@
                   📦 {{ table.activeOrder.items?.length || 0 }} προϊόντα
                 </span>
               </div>
-              @if (table.status === 'RESERVED' && table.reservation) {
-  <div class="flex flex-col gap-0.5">
-    <span class="text-[11px] text-purple-300 font-bold truncate">
-      👤 {{ table.reservation.customerName }} ({{ table.reservation.partySize }} άτομα)
-    </span>
-    <span class="text-[10px] text-slate-400">
-      ⏰ {{ table.reservation.reservationTime }} {{ table.reservation.phone ? '• ' + table.reservation.phone : '' }}
-    </span>
-  </div>
-}
+            } @else if (table.status === 'RESERVED' && table.reservation) {
+              <div class="flex flex-col gap-0.5">
+                <span class="text-[11px] text-purple-300 font-bold truncate">
+                  👤 {{ table.reservation.customerName }} ({{ table.reservation.partySize }} άτομα)
+                </span>
+                <span class="text-[10px] text-slate-400 truncate">
+                  ⏰ {{ table.reservation.reservationTime }} {{ table.reservation.phone ? '• ' + table.reservation.phone : '' }}
+                </span>
+              </div>
             } @else {
               <span class="text-[11px] text-slate-500 italic">
                 Ελεύθερο
@@ -140,29 +139,57 @@
             }
           </div>
 
-          <!-- BOTTOM ROW: TOTAL & QUICK PAY -->
-          <div class="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
-            <div>
-              <span class="text-sm font-black" 
-                    [ngClass]="table.status !== 'FREE' ? 'text-amber-400' : 'text-slate-500'">
-                €{{ (table.currentTotal || table.activeOrder?.grandTotal || 0).toFixed(2) }}
-              </span>
-            </div>
+          <!-- BOTTOM ROW: TOTAL, ACTIONS & RESERVATION BUTTONS -->
+          <div class="pt-2 border-t border-slate-800/80 flex flex-col gap-2">
+            
+            <!-- 1. Running Total & Settle Buttons (when table is occupied) -->
+            @if (table.status !== 'FREE' && table.status !== 'RESERVED') {
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-sm font-black text-amber-400">
+                  €{{ (table.currentTotal || table.activeOrder?.grandTotal || 0).toFixed(2) }}
+                </span>
 
-            @if (table.status !== 'FREE' && (table.currentTotal || table.activeOrder?.grandTotal)) {
-              <div class="flex items-center gap-1 shrink-0" (click)="$event.stopPropagation()">
-                <button (click)="processPayment(table.id, 'CASH', $event)"
-                        title="Εξόφληση Μετρητά"
-                        class="px-2 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/40 text-[10px] font-black transition-all active:scale-95 cursor-pointer">
-                  💵
+                <div class="flex items-center gap-1 shrink-0" (click)="$event.stopPropagation()">
+                  <button (click)="processPayment(table.id, 'CASH', $event)"
+                          title="Εξόφληση Μετρητά"
+                          class="px-2 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/40 text-[10px] font-black transition-all active:scale-95 cursor-pointer">
+                    💵
+                  </button>
+                  <button (click)="processPayment(table.id, 'CARD', $event)"
+                          title="Εξόφληση Κάρτα"
+                          class="px-2 py-1 rounded-lg bg-sky-600/30 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/40 text-[10px] font-black transition-all active:scale-95 cursor-pointer">
+                    💳
+                  </button>
+                </div>
+              </div>
+            }
+
+            <!-- 2. Reserved State Quick Actions -->
+            @if (table.status === 'RESERVED') {
+              <div class="flex items-center gap-1.5 w-full" (click)="$event.stopPropagation()">
+                <button (click)="seatReservedTable(table, $event)"
+                        class="flex-1 py-1 px-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-bold transition-all shadow-sm flex items-center justify-center gap-1 cursor-pointer">
+                  ✅ Άνοιγμα
                 </button>
-                <button (click)="processPayment(table.id, 'CARD', $event)"
-                        title="Εξόφληση Κάρτα"
-                        class="px-2 py-1 rounded-lg bg-sky-600/30 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/40 text-[10px] font-black transition-all active:scale-95 cursor-pointer">
-                  💳
+                <button (click)="cancelReservation(table, $event)"
+                        title="Ακύρωση Κράτησης"
+                        class="py-1 px-2.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/40 text-rose-300 border border-rose-500/30 text-[11px] font-bold transition-all cursor-pointer">
+                  ✕
                 </button>
               </div>
             }
+
+            <!-- 3. Free State Quick Reserve Button -->
+            @if (table.status === 'FREE' || table.status === 'AVAILABLE' || (!table.status && !table.activeOrder)) {
+              <div class="flex items-center justify-between gap-1 w-full" (click)="$event.stopPropagation()">
+                <span class="text-sm font-black text-slate-500">€0.00</span>
+                <button (click)="openReservationPrompt(table, $event)"
+                        class="py-1 px-2 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer">
+                  📅 Κράτηση
+                </button>
+              </div>
+            }
+
           </div>
 
         </div>

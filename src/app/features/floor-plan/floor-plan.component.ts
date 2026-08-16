@@ -245,4 +245,43 @@ public getTableVisualStatus(table: RestaurantTable): TableVisualStatus {
 
     this.closingVault.set(null);
   }
+
+  // Open reservation prompt/dialog
+public async openReservationPrompt(table: RestaurantTable, event?: Event): Promise<void> {
+    if (event) event.stopPropagation();
+
+    const customerName = prompt(`📅 Κράτηση για Τραπέζι ${table.number || table.tableNumber}\n\nΌνομα Πελάτη:`);
+    if (!customerName?.trim()) return;
+
+    const time = prompt('Ώρα κράτησης (π.χ. 21:00):', '20:30') || '20:30';
+    const partySizeStr = prompt('Αριθμός ατόμων:', String(table.seats || table.capacity || 4));
+    const phone = prompt('Τηλέφωνο επικοινωνίας (προαιρετικό):', '') || undefined;
+
+    const reservationInfo = {
+      customerName: customerName.trim(),
+      reservationTime: time.trim(),
+      partySize: parseInt(partySizeStr || '4', 10) || 4,
+      phone: phone?.trim()
+    };
+
+    if (this.posService.reserveTable) {
+      await this.posService.reserveTable(table.id, reservationInfo);
+    }
+  }
+
+  public async cancelReservation(table: RestaurantTable, event?: Event): Promise<void> {
+    if (event) event.stopPropagation();
+
+    const confirmed = confirm(`Ακύρωση κράτησης για το Τραπέζι ${table.number || table.tableNumber} (${table.reservation?.customerName || ''});`);
+    if (!confirmed) return;
+
+    if (this.posService.cancelReservation) {
+      await this.posService.cancelReservation(table.id);
+    }
+  }
+
+  public seatReservedTable(table: RestaurantTable, event?: Event): void {
+    if (event) event.stopPropagation();
+    this.router.navigate(['/order', table.id]);
+  }
 }

@@ -105,6 +105,8 @@ export class RestaurantPosService {
   public auditLogs = signal<AuditLog[]>([]);
   public zReports = signal<DailyZReportSnapshot[]>([]);
   public salesHistory = signal<SaleRecord[]>([]);
+  public reserveTable = this.tableOrderService.reserveTable.bind(this.tableOrderService);
+  public cancelReservation = this.tableOrderService.cancelReservation.bind(this.tableOrderService);
 
   // --- TENANT COMPUTATIONS ---
   public activeTenantId = computed(() => {
