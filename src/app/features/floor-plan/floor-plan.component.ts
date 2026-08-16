@@ -8,7 +8,7 @@ import { Router } from '@angular/router';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
 import { RestaurantTable, WaiterVaultSession } from '../../core/modals/restaurant-pos.modals';
 
-export type TableVisualStatus = 'FREE' | 'PENDING' | 'PREPARING' | 'READY_TO_SERVE' | 'BILL_PRINTED';
+export type TableVisualStatus = 'FREE' | 'PENDING' | 'PREPARING' | 'READY_TO_SERVE' | 'BILL_PRINTED' | 'RESERVED';
 
 @Component({
   selector: 'app-floor-plan',
@@ -101,19 +101,27 @@ export class FloorPlanComponent {
     return notifications.some(n => n.tableId === table.id);
   }
 
-  public getTableVisualStatus(table: RestaurantTable): TableVisualStatus {
+public getTableVisualStatus(table: RestaurantTable): TableVisualStatus {
     if (this.isTableReady(table)) {
       return 'READY_TO_SERVE';
     }
-    if (!table.status || table.status === 'FREE' || !table.activeOrder) {
+
+    if (table.status === 'RESERVED') {
+      return 'RESERVED';
+    }
+
+    if (!table.status || table.status === 'FREE' || table.status === 'AVAILABLE' || !table.activeOrder) {
       return 'FREE';
     }
+
     if (table.status === 'BILL_PRINTED') {
       return 'BILL_PRINTED';
     }
 
-    const items = (table.activeOrder.items || []).filter(i => i.status !== 'VOIDED');
-    if (items.length === 0) return 'FREE';
+    const items = (table.activeOrder.items || []).filter(i => (i as any).status !== 'VOIDED');
+    if (items.length === 0) {
+      return 'FREE';
+    }
 
     const statuses = items.map(i => i.status);
 
@@ -132,6 +140,8 @@ export class FloorPlanComponent {
     const visualStatus = this.getTableVisualStatus(table);
 
     switch (visualStatus) {
+      case 'RESERVED':
+        return 'border-purple-500/80 shadow-[0_0_15px_rgba(168,85,247,0.25)] bg-purple-950/20';
       case 'READY_TO_SERVE':
         return 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)] bg-emerald-950/20';
       case 'PREPARING':
@@ -140,6 +150,7 @@ export class FloorPlanComponent {
         return 'border-sky-400/80 hover:border-sky-400 bg-sky-950/20';
       case 'PENDING':
         return 'border-red-500/50 hover:border-red-500/90 bg-red-950/20';
+      case 'FREE':
       default:
         return 'border-slate-800 hover:border-emerald-500/50';
     }

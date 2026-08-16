@@ -18,8 +18,9 @@ import { TenantContextService } from './tenant-context.service';
 import { 
   Table, 
   ActiveOrder, 
-  TableOrderItem, 
+  TableOrderItem,
   ItemPreparationStatus, 
+  TableReservationInfo,
   Product, 
   OrderModifier, 
   SaleRecord, 
@@ -762,4 +763,41 @@ export class TableOrderService {
 
     this.router.navigate(['/floor-plan']);
   }
+
+  public async reserveTable(tableId: string, info: TableReservationInfo): Promise<void> {
+  const table = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
+  if (!table) return;
+
+  const updated: Table = {
+    ...table,
+    status: 'RESERVED',
+    reservation: info
+  };
+
+  this.tables.update(list => list.map(t => t.id === table.id ? updated : t));
+
+  if (this.db) {
+    await setDoc(doc(this.db, 'tables', table.id), safeFirestorePayload(updated), { merge: true });
+  }
+}
+
+public async cancelReservation(tableId: string): Promise<void> {
+  const table = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
+  if (!table) return;
+
+  const updated: Table = {
+    ...table,
+    status: 'FREE',
+    reservation: undefined
+  };
+
+  this.tables.update(list => list.map(t => t.id === table.id ? updated : t));
+
+  if (this.db) {
+    await setDoc(doc(this.db, 'tables', table.id), {
+      status: 'FREE',
+      reservation: null
+    }, { merge: true });
+  }
+}
 }
