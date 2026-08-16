@@ -33,10 +33,6 @@ export class FloorPlanComponent {
     return all.filter(t => (t.zone === zone || t.section === zone));
   });
 
-  /**
-   * Safe Table Navigation:
-   * Stops event bubbling so background DOM re-renders from other devices cannot trigger navigation.
-   */
   public onTableSelect(table: RestaurantTable, event?: Event): void {
     if (event) {
       event.stopPropagation();
@@ -50,6 +46,7 @@ export class FloorPlanComponent {
   public openTakeaway(event?: Event): void {
     if (event) {
       event.stopPropagation();
+      event.stopImmediatePropagation();
     }
 
     let takeawayTable = this.posService.tables().find(t => t.id === 'takeaway-counter');
@@ -73,6 +70,7 @@ export class FloorPlanComponent {
   public handleManagerSettlement(tableId: string, method: 'CASH' | 'CARD', event?: Event): void {
     if (event) {
       event.stopPropagation();
+      event.stopImmediatePropagation();
     }
 
     const activeVaults = this.posService.activeVaultSessions();
@@ -150,21 +148,16 @@ export class FloorPlanComponent {
   public processPayment(tableId: string, method: 'CASH' | 'CARD', event?: Event): void {
     if (event) {
       event.stopPropagation();
+      event.stopImmediatePropagation();
     }
 
     const table = this.posService.tables().find(t => t.id === tableId);
     const activeOrder = table?.activeOrder;
 
-    // Strict Unsent Items Check
     if (activeOrder && activeOrder.items) {
-      const unsentItems = activeOrder.items.filter(
-        item => item.status === 'PENDING'
-      );
-
+      const unsentItems = activeOrder.items.filter(item => item.status === 'PENDING');
       if (unsentItems.length > 0) {
-        alert(
-          `⚠️ Υπάρχουν ${unsentItems.length} προϊόντα που δεν έχουν σταλεί στην κουζίνα!\n\nΠαρακαλώ στείλτε την παραγγελία στην κουζίνα ή διαγράψτε τα εκκρεμή προϊόντα πριν την εξόφληση.`
-        );
+        alert(`⚠️ Υπάρχουν ${unsentItems.length} εκκρεμή προϊόντα που δεν έχουν σταλεί στην κουζίνα!`);
         return;
       }
     }
@@ -187,7 +180,7 @@ export class FloorPlanComponent {
 
   private promptSelectActiveWaiterVault(activeVaults: WaiterVaultSession[]): string | null {
     if (!activeVaults || activeVaults.length === 0) {
-      alert('Δεν υπάρχει κανένα ενεργό ταμείο σερβιτόρου αυτή τη στιγμή.');
+      alert('Δεν υπάρχει ενεργό ταμείο σερβιτόρου.');
       return null;
     }
 
@@ -196,13 +189,10 @@ export class FloorPlanComponent {
     }
 
     const vaultListText = activeVaults
-      .map((v, index) => `${index + 1}. ${v.waiterName} (Μετρητά: €${(v.cashCollected || 0).toFixed(2)})`)
+      .map((v, index) => `${index + 1}. ${v.waiterName} (€${(v.cashCollected || 0).toFixed(2)})`)
       .join('\n');
 
-    const input = prompt(
-      `Επιλέξτε Ταμείο Σερβιτόρου για την πίστωση της πληρωμής:\n\n${vaultListText}\n\nΠληκτρολογήστε τον αριθμό (1-${activeVaults.length}):`
-    );
-
+    const input = prompt(`Επιλέξτε Ταμείο:\n\n${vaultListText}\n\nΑριθμός (1-${activeVaults.length}):`);
     if (input !== null) {
       const selectedIndex = parseInt(input.trim(), 10) - 1;
       if (!isNaN(selectedIndex) && activeVaults[selectedIndex]) {
@@ -216,6 +206,7 @@ export class FloorPlanComponent {
   public openVaultClosure(vault: WaiterVaultSession, event?: Event): void {
     if (event) {
       event.stopPropagation();
+      event.stopImmediatePropagation();
     }
     this.closingVault.set(vault);
   }

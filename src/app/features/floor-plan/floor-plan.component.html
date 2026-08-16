@@ -1,126 +1,208 @@
+<div class="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
+  
+  <!-- TOP CONTROL & ZONE FILTER BAR -->
+  <header class="bg-slate-900 border-b border-slate-800 px-4 py-3 flex flex-wrap items-center justify-between gap-4 shadow-lg sticky top-0 z-30 min-h-[4rem]">
+    
+    <!-- 1. TITLE & USER INFO -->
+    <div class="flex items-center gap-3 shrink-0">
+      <div class="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-xl shadow-md">
+        🪑
+      </div>
+      <div>
+        <h1 class="text-base font-black text-white m-0 leading-none">Πλάνο Τραπεζιών</h1>
+        <span class="text-[10px] text-amber-400 font-bold block mt-1">
+          {{ posService.currentEmployee()?.name || 'Χρήστης' }} ({{ posService.currentEmployee()?.role }})
+        </span>
+      </div>
+    </div>
 
-    <div class="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
+    <!-- 2. TAKEAWAY BUTTON -->
+    <div class="flex items-center shrink-0 ml-auto sm:order-3">
+      <button (click)="openTakeaway($event)"
+              class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-lg transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer">
+        <span>🛍️</span>
+        <span class="hidden sm:inline">Γρήγορο Πακέτο</span>
+        <span class="sm:hidden">Πακέτο</span>
+      </button>
+    </div>
+
+    <!-- 3. ZONE FILTERS -->
+    <div class="flex items-center gap-1.5 overflow-x-auto hide-scrollbar w-full sm:w-auto sm:flex-1 sm:justify-center order-last sm:order-2 pb-1 sm:pb-0">
+      <button (click)="selectedZone.set('ALL')"
+              class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
+              [ngClass]="selectedZone() === 'ALL' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+        🌐 Όλα
+      </button>
       
-      <!-- TOP CONTROL & ZONE FILTER BAR -->
-     <!-- TOP CONTROL & ZONE FILTER BAR -->
-      <header class="bg-slate-900 border-b border-slate-800 px-4 py-3 flex flex-wrap items-center justify-between gap-4 shadow-lg sticky top-0 z-30 min-h-[4rem]">
-        
-        <!-- 1. TITLE & BADGE -->
-        <div class="flex items-center gap-3 shrink-0">
-          <div class="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-xl shadow-md">
-            🪑
-          </div>
-          <div>
-            <h1 class="text-base font-black text-white m-0 leading-none">Πλάνο Τραπεζιών</h1>
-            <span class="text-[10px] text-amber-400 font-bold block mt-1">
-              {{ posService.currentEmployee()?.name || 'Χρήστης' }} ({{ posService.currentEmployee()?.role }})
-            </span>
-          </div>
-        </div>
+      <button (click)="selectedZone.set('Σάλα')"
+              class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
+              [ngClass]="selectedZone() === 'Σάλα' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+        🏠 Σάλα
+      </button>
 
-        <!-- 2. TAKEAWAY BUTTON (Always visible, goes top right on mobile) -->
-        <div class="flex items-center shrink-0 ml-auto sm:order-3">
-          <button (click)="openTakeaway()"
-                  class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-lg transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer">
-            <span>🛍️</span>
-            <span class="hidden sm:inline">Γρήγορο Πακέτο</span>
-            <span class="sm:hidden">Πακέτο</span>
-          </button>
-        </div>
+      <button (click)="selectedZone.set('Αυλή')"
+              class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
+              [ngClass]="selectedZone() === 'Αυλή' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+        🌿 Αυλή
+      </button>
 
-        <!-- 3. ZONE FILTERS (Full width scrollable line on mobile, centers on desktop) -->
-        <div class="flex items-center gap-1.5 overflow-x-auto hide-scrollbar w-full sm:w-auto sm:flex-1 sm:justify-center order-last sm:order-2 pb-1 sm:pb-0">
-          <button (click)="selectedZone.set('ALL')"
-                  class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
-                  [ngClass]="selectedZone() === 'ALL' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
-            🌐 Όλα
-          </button>
-          
-          <button (click)="selectedZone.set('Σάλα')"
-                  class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
-                  [ngClass]="selectedZone() === 'Σάλα' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
-            🏠 Σάλα
-          </button>
+      <button (click)="selectedZone.set('Bar')"
+              class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
+              [ngClass]="selectedZone() === 'Bar' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+        ☕ Bar
+      </button>
+    </div>
 
-          <button (click)="selectedZone.set('Αυλή')"
-                  class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
-                  [ngClass]="selectedZone() === 'Αυλή' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
-            🌿 Αυλή
-          </button>
+  </header>
 
-          <button (click)="selectedZone.set('Bar')"
-                  class="px-3 py-1.5 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
-                  [ngClass]="selectedZone() === 'Bar' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
-            ☕ Bar
-          </button>
-        </div>
+  <!-- MAIN TABLE GRID -->
+  <main class="flex-1 p-4 md:p-6 overflow-y-auto">
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+      
+      @for (table of filteredTables(); track table.id) {
+        <div (click)="onTableSelect(table, $event)"
+             [class]="getTableCardBorderClass(table)"
+             class="cursor-pointer rounded-2xl border bg-slate-900/90 p-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] flex flex-col justify-between min-h-[160px] relative shadow-lg">
 
-      </header>
-
-      <!-- MAIN TABLE GRID -->
-      <main class="flex-1 p-4 md:p-6 overflow-y-auto">
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          
-         @for (table of filteredTables(); track table.id) {
-  <div (click)="onTableSelect(table, $event)"
-       [class]="getTableCardBorderClass(table)"
-       class="cursor-pointer ...">
-       
-       <!-- Any action buttons inside the card (like fast payment or status) must also pass $event -->
-       <button (click)="processPayment(table.id, 'CASH', $event)">...</button>
-  </div>
-       } @empty {
-            <div class="col-span-full py-24 text-center flex flex-col items-center justify-center text-slate-600">
-              <span class="text-6xl mb-3">🪑</span>
-              <span class="text-sm font-bold">Δεν βρέθηκαν τραπέζια στη συγκεκριμένη ζώνη.</span>
-            </div>
-          }
-
-        </div>
-      </main>
-
-      <!-- WAITER VAULT SELECTION MODAL FOR MANAGER -->
-      @if (selectingVaultForSettlement(); as target) {
-        <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl flex flex-col gap-4">
-            
-            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
-              <div>
-                <h3 class="text-base font-black text-white m-0">👛 Επιλογή Ταμείου Σερβιτόρου</h3>
-                <span class="text-xs text-amber-400">Πίστωση πληρωμής {{ target.method }}</span>
-              </div>
-              <button (click)="selectingVaultForSettlement.set(null)" class="text-slate-400 hover:text-white text-xl cursor-pointer">✕</button>
+          <!-- TOP ROW: TABLE NUMBER & SEATS -->
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex flex-col">
+              <span class="text-xl font-black text-white leading-tight">
+                #{{ table.number || table.tableNumber || 1 }}
+              </span>
+              <span class="text-[11px] text-slate-400 font-medium">
+                {{ table.name || ('Τραπέζι ' + (table.number || table.tableNumber)) }}
+              </span>
             </div>
 
-            <div class="flex flex-col gap-2.5">
-              @for (vault of posService.activeVaultSessions(); track vault.id) {
-                <button (click)="confirmVaultSelection(vault.id)"
-                        class="p-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/50 flex items-center justify-between transition-all cursor-pointer text-left">
-                  <div class="flex items-center gap-2.5">
-                    <span class="w-8 h-8 rounded-full bg-amber-500/20 text-amber-400 font-black text-xs flex items-center justify-center">
-                      👤
-                    </span>
-                    <div>
-                      <span class="font-bold text-white text-xs block">{{ vault.waiterName }}</span>
-                      <span class="text-[10px] text-slate-400">Έναρξη: {{ vault.openedAt | date:'shortTime' }}</span>
-                    </div>
-                  </div>
-                  <span class="text-xs font-black text-emerald-400">€{{ vault.cashCollected.toFixed(2) }}</span>
-                </button>
+            <!-- STATUS BADGE -->
+            <div class="shrink-0">
+              @switch (getTableVisualStatus(table)) {
+                @case ('READY_TO_SERVE') {
+                  <span class="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-black animate-pulse flex items-center gap-1">
+                    🔔 Έτοιμο
+                  </span>
+                }
+                @case ('PREPARING') {
+                  <span class="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/40 text-[10px] font-black flex items-center gap-1">
+                    ⏳ Κουζίνα
+                  </span>
+                }
+                @case ('BILL_PRINTED') {
+                  <span class="px-2 py-0.5 rounded-lg bg-sky-500/20 text-sky-400 border border-sky-500/40 text-[10px] font-black flex items-center gap-1">
+                    🧾 Λογ/σμός
+                  </span>
+                }
+                @case ('PENDING') {
+                  <span class="px-2 py-0.5 rounded-lg bg-rose-500/20 text-rose-400 border border-rose-500/40 text-[10px] font-black flex items-center gap-1">
+                    🔴 Εκκρεμεί
+                  </span>
+                }
+                @default {
+                  <span class="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 text-[10px] font-bold">
+                    👥 {{ table.seats || table.capacity || 4 }}
+                  </span>
+                }
               }
             </div>
-
           </div>
+
+          <!-- MIDDLE ROW: WAITER & ITEM COUNT -->
+          <div class="my-2.5">
+            @if (table.activeOrder && table.status !== 'FREE') {
+              <div class="flex flex-col gap-0.5">
+                <span class="text-[11px] text-amber-400/90 font-medium truncate">
+                  👤 {{ table.assignedWaiterName || table.waiterName || 'Σερβιτόρος' }}
+                </span>
+                <span class="text-[10px] text-slate-400">
+                  📦 {{ table.activeOrder.items?.length || 0 }} προϊόντα
+                </span>
+              </div>
+            } @else {
+              <span class="text-[11px] text-slate-500 italic">
+                Ελεύθερο
+              </span>
+            }
+          </div>
+
+          <!-- BOTTOM ROW: TOTAL & QUICK PAY -->
+          <div class="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
+            <div>
+              <span class="text-sm font-black" 
+                    [ngClass]="table.status !== 'FREE' ? 'text-amber-400' : 'text-slate-500'">
+                €{{ (table.currentTotal || table.activeOrder?.grandTotal || 0).toFixed(2) }}
+              </span>
+            </div>
+
+            @if (table.status !== 'FREE' && (table.currentTotal || table.activeOrder?.grandTotal)) {
+              <div class="flex items-center gap-1 shrink-0" (click)="$event.stopPropagation()">
+                <button (click)="processPayment(table.id, 'CASH', $event)"
+                        title="Εξόφληση Μετρητά"
+                        class="px-2 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/40 text-[10px] font-black transition-all active:scale-95 cursor-pointer">
+                  💵
+                </button>
+                <button (click)="processPayment(table.id, 'CARD', $event)"
+                        title="Εξόφληση Κάρτα"
+                        class="px-2 py-1 rounded-lg bg-sky-600/30 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/40 text-[10px] font-black transition-all active:scale-95 cursor-pointer">
+                  💳
+                </button>
+              </div>
+            }
+          </div>
+
+        </div>
+      } @empty {
+        <div class="col-span-full py-24 text-center flex flex-col items-center justify-center text-slate-600">
+          <span class="text-6xl mb-3">🪑</span>
+          <span class="text-sm font-bold">Δεν βρέθηκαν τραπέζια στη συγκεκριμένη ζώνη.</span>
         </div>
       }
 
-      <!-- SHIFT / VAULT CLOSURE MODAL -->
-@if (closingVault(); as vault) {
-  <app-vault-closure-modal
-    [vault]="vault"
-    (cancel)="closingVault.set(null)"
-    (completeShiftClose)="handleShiftClosure($event)">
-  </app-vault-closure-modal>
-}
-
     </div>
+  </main>
+
+  <!-- WAITER VAULT SELECTION MODAL FOR MANAGER -->
+  @if (selectingVaultForSettlement(); as target) {
+    <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl flex flex-col gap-4">
+        
+        <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+          <div>
+            <h3 class="text-base font-black text-white m-0">👛 Επιλογή Ταμείου Σερβιτόρου</h3>
+            <span class="text-xs text-amber-400">Πίστωση πληρωμής {{ target.method }}</span>
+          </div>
+          <button (click)="selectingVaultForSettlement.set(null)" class="text-slate-400 hover:text-white text-xl cursor-pointer">✕</button>
+        </div>
+
+        <div class="flex flex-col gap-2.5">
+          @for (vault of posService.activeVaultSessions(); track vault.id) {
+            <button (click)="confirmVaultSelection(vault.id)"
+                    class="p-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/50 flex items-center justify-between transition-all cursor-pointer text-left">
+              <div class="flex items-center gap-2.5">
+                <span class="w-8 h-8 rounded-full bg-amber-500/20 text-amber-400 font-black text-xs flex items-center justify-center">
+                  👤
+                </span>
+                <div>
+                  <span class="font-bold text-white text-xs block">{{ vault.waiterName }}</span>
+                  <span class="text-[10px] text-slate-400">Έναρξη: {{ vault.openedAt | date:'shortTime' }}</span>
+                </div>
+              </div>
+              <span class="text-xs font-black text-emerald-400">€{{ vault.cashCollected.toFixed(2) }}</span>
+            </button>
+          }
+        </div>
+
+      </div>
+    </div>
+  }
+
+  <!-- SHIFT / VAULT CLOSURE MODAL -->
+  @if (closingVault(); as vault) {
+    <app-vault-closure-modal
+      [vault]="vault"
+      (cancel)="closingVault.set(null)"
+      (completeShiftClose)="handleShiftClosure($event)">
+    </app-vault-closure-modal>
+  }
+
+</div>
