@@ -11,8 +11,6 @@ import {
   onSnapshot, 
   deleteField, 
   Timestamp,
-  query,
-  where,
   Unsubscribe
 } from 'firebase/firestore';
 import { TenantContextService } from './tenant-context.service';
@@ -37,11 +35,22 @@ export interface CartItem {
   quantity: number;
 }
 
-// 🛡️ Bulletproof payload sanitizer that removes undefined AND catches NaN errors
+function normalizeKey(val?: string | null): string {
+  if (!val) return '';
+  return String(val).trim().toLowerCase().replace(/[\s_-]+/g, '');
+}
+
+// 🛡️ Bulletproof payload sanitizer that preserves deleteField() and catches NaN errors
 function safeFirestorePayload(obj: any): any {
   if (obj === null || obj === undefined) return obj;
   if (typeof obj === 'number') return isNaN(obj) ? 0 : obj;
   if (typeof obj !== 'object') return obj;
+  
+  // Preserve Firestore FieldValue operations (like deleteField)
+  if (obj && typeof obj === 'object' && obj.constructor?.name === 'FieldValue') {
+    return obj;
+  }
+  
   if (Array.isArray(obj)) return obj.map(safeFirestorePayload).filter(v => v !== undefined);
   
   const copy: any = {};
@@ -111,7 +120,7 @@ export class TableOrderService {
     }, 0)
   );
 
-  private getActiveTenantAndStore(): { tenantId: string; storeId: string } {
+  public getActiveTenantAndStore(): { tenantId: string; storeId: string } {
     const tenantId = 
       localStorage.getItem('active_tenant_id') ||
       (this.tenantContext as any).currentTenantId?.() || 
@@ -128,7 +137,7 @@ export class TableOrderService {
     return { tenantId, storeId };
   }
 
-  private getInitialDefaultTables(tenantId: string, storeId: string): Table[] {
+  public getInitialDefaultTables(tenantId: string, storeId: string): Table[] {
     return [
       { id: `${storeId}_t1`, tenantId, storeId, number: 1, tableNumber: 1, seats: 4, section: 'INDOOR', zone: 'Σάλα', status: 'FREE', currentTotal: 0 },
       { id: `${storeId}_t2`, tenantId, storeId, number: 2, tableNumber: 2, seats: 2, section: 'INDOOR', zone: 'Σάλα', status: 'FREE', currentTotal: 0 },
@@ -136,7 +145,7 @@ export class TableOrderService {
       { id: `${storeId}_t4`, tenantId, storeId, number: 4, tableNumber: 4, seats: 4, section: 'OUTDOOR', zone: 'Αυλή', status: 'FREE', currentTotal: 0 },
       { id: `${storeId}_t5`, tenantId, storeId, number: 5, tableNumber: 5, seats: 4, section: 'OUTDOOR', zone: 'Αυλή', status: 'FREE', currentTotal: 0 },
       { id: `${storeId}_t6`, tenantId, storeId, number: 6, tableNumber: 6, seats: 2, section: 'BAR', zone: 'Bar', status: 'FREE', currentTotal: 0 },
-      { id: `${storeId}_takeaway-counter`, tenantId, storeId, number: 99, tableNumber: 99, seats: 1, section: 'TAKEAWAY', zone: 'Παραλαβή', status: 'FREE', currentTotal: 0 }
+      { id: `${storeId}_takeaway-counter`, tenantId, storeId, number: 99, tableNumber: 99, seats: 1, section: 'TAKEAWAY', zone: 'Takeaway', status: 'FREE', currentTotal: 0 }
     ];
   }
 
@@ -148,24 +157,30 @@ export class TableOrderService {
       this.activeTablesUnsub();
     }
 
-    const { tenantId, storeId } = this.getActiveTenantAndStore();
-    const initialDefaultTables = this.getInitialDefaultTables(tenantId, storeId);
+    this.activeTablesUnsub = onSnapshot(collection(this.db, 'tables'), async (snap) => {
+      const activeEmp = getCurrentEmployeeFn();
+      const currentTenant = activeEmp?.tenantId || this.getActiveTenantAndStore().tenantId;
+      const currentStore = activeEmp?.storeId || this.getActiveTenantAndStore().storeId;
 
-    const tablesQuery = query(
-      collection(this.db, 'tables'),
-      where('tenantId', '==', tenantId),
-      where('storeId', '==', storeId)
-    );
+      const targetTenant = normalizeKey(currentTenant);
+      const targetStore = normalizeKey(currentStore);
 
-    this.activeTablesUnsub = onSnapshot(tablesQuery, (snap) => {
       const cloudTableMap = new Map<string, Table>();
       const newlyServedItems: { tableId: string; tableNumber: number; zone: string; itemSummary: string }[] = [];
       const extractedActiveOrders: ActiveOrder[] = [];
 
-      if (!snap.empty) {
-        snap.forEach(docSnap => {
-          const rawTable = docSnap.data() as any;
-          
+      snap.forEach(docSnap => {
+        const rawTable = docSnap.data() as any;
+        const tableId = docSnap.id;
+        
+        const docTenant = normalizeKey(rawTable.tenantId);
+        const docStore = normalizeKey(rawTable.storeId);
+
+        // Allow match if tenant matches OR if legacy table without explicit tenant
+        const matchesTenant = !docTenant || docTenant === targetTenant;
+        const matchesStore = !docStore || docStore === targetStore || docStore === 'all';
+
+        if (matchesTenant && matchesStore) {
           const hasActiveOrderItems = Boolean(
             rawTable.activeOrder?.items && 
             rawTable.activeOrder.items.length > 0
@@ -173,10 +188,17 @@ export class TableOrderService {
           const hasPositiveTotal = Number(rawTable.currentTotal || rawTable.activeOrder?.grandTotal || 0) > 0;
           const isExplicitlyFree = rawTable.status === 'FREE' && !hasActiveOrderItems && !hasPositiveTotal;
 
-          const activeStatus = isExplicitlyFree ? 'FREE' : (rawTable.status === 'BILL_PRINTED' ? 'BILL_PRINTED' : 'OCCUPIED');
+          const activeStatus = isExplicitlyFree 
+            ? 'FREE' 
+            : (rawTable.status === 'BILL_PRINTED' ? 'BILL_PRINTED' : 'OCCUPIED');
 
           const t: Table = {
             ...rawTable,
+            id: tableId,
+            tenantId: rawTable.tenantId || currentTenant,
+            storeId: rawTable.storeId || currentStore,
+            number: rawTable.number || rawTable.tableNumber || 1,
+            tableNumber: rawTable.number || rawTable.tableNumber || 1,
             status: activeStatus,
             currentTotal: isExplicitlyFree ? 0 : Number(rawTable.currentTotal || rawTable.activeOrder?.grandTotal || 0),
             activeOrder: isExplicitlyFree ? undefined : rawTable.activeOrder,
@@ -207,18 +229,21 @@ export class TableOrderService {
               }
             }
           }
-        });
-      }
+        }
+      });
 
       let mergedList: Table[] = [];
       if (cloudTableMap.size > 0) {
         cloudTableMap.forEach(cloudTable => mergedList.push(cloudTable));
       } else {
-        mergedList = [...initialDefaultTables];
-        if (tenantId === 'coffee-shop-demo') {
-          initialDefaultTables.forEach(t => {
-            setDoc(doc(this.db!, 'tables', t.id), safeFirestorePayload(t)).catch(() => {});
-          });
+        // Auto-seed default tables to Firestore so newly switched stores are never empty
+        const defaultTables = this.getInitialDefaultTables(currentTenant, currentStore);
+        mergedList = [...defaultTables];
+        
+        if (this.db) {
+          for (const tbl of defaultTables) {
+            await setDoc(doc(this.db, 'tables', tbl.id), safeFirestorePayload(tbl), { merge: true }).catch(() => {});
+          }
         }
       }
 
@@ -250,7 +275,7 @@ export class TableOrderService {
 
     setTimeout(() => {
       this.dismissNotification(fullNotif.id);
-    }, 2000);
+    }, 3000);
   }
 
   public clearAllNotifications(): void {
@@ -355,17 +380,14 @@ export class TableOrderService {
   ): void {
     const { tenantId, storeId } = this.getActiveTenantAndStore();
 
-    // 🛡️ Bulletproof Table Matching
     const table = this.tables().find(t => t.id === tableId || String(t.number) === String(tableId) || String(t.tableNumber) === String(tableId));
     if (!table) {
       console.error('Table match failed for tableId:', tableId);
       return;
     }
 
-    // 🛡️ Extract modifiers correctly if embedded in the product
     const actualModifiers = modifiers.length > 0 ? modifiers : ((product as any).selectedModifiers || []);
     
-    // 🛡️ Prevent NaN Math Errors
     const pPrice = Number(product.price) || 0;
     const extraCost = actualModifiers.reduce((acc: number, m: any) => acc + (Number(m.priceExtra) || 0), 0);
     const finalPrice = Number((pPrice + extraCost).toFixed(2));
@@ -431,7 +453,7 @@ export class TableOrderService {
 
     if (this.db) {
       setDoc(doc(this.db, 'tables', table.id), safeFirestorePayload(updatedT))
-        .catch(err => console.error('🔥 Firebase Save Error in addOrderItemToTable:', err));
+        .catch(err => console.error('Firebase Save Error in addOrderItemToTable:', err));
     }
   }
 
@@ -479,7 +501,7 @@ export class TableOrderService {
     if (this.db) {
       try {
         await setDoc(doc(this.db, 'tables', table.id), safeFirestorePayload(updatedTable));
-      } catch (e) { console.error('🔥 Save Error updateTableOrderItemQuantity:', e); }
+      } catch (e) { console.error('Save Error updateTableOrderItemQuantity:', e); }
     }
   }
 
@@ -553,7 +575,7 @@ export class TableOrderService {
     if (this.db) {
       try {
         await setDoc(doc(this.db, 'tables', table.id), safeFirestorePayload(updatedTable));
-      } catch (e) { console.error('🔥 Save Error voidTableOrderItem:', e); }
+      } catch (e) { console.error('Save Error voidTableOrderItem:', e); }
     }
   }
 
@@ -640,7 +662,7 @@ export class TableOrderService {
     }
   }
 
- public async settleTablePayment(
+  public async settleTablePayment(
     tableId: string, 
     paymentMethod: 'CASH' | 'CARD' | 'DEBT', 
     currentEmp: Employee | null, 
@@ -649,7 +671,6 @@ export class TableOrderService {
     const table = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
     if (!table) return;
 
-    // ⛔ Strict Prevention: Check for unsent kitchen items
     if (table.activeOrder && table.activeOrder.items) {
       const unsentItems = table.activeOrder.items.filter(item => item.status === 'PENDING');
       if (unsentItems.length > 0) {
@@ -725,8 +746,10 @@ export class TableOrderService {
           ...freedTable,
           activeOrder: deleteField(),
           waiterId: deleteField(),
-          waiterName: deleteField()
-        }));
+          waiterName: deleteField(),
+          assignedWaiterId: deleteField(),
+          assignedWaiterName: deleteField()
+        }), { merge: true });
       } catch (e) { console.error(e); }
     }
 
