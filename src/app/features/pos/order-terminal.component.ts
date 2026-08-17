@@ -53,26 +53,36 @@ export class OrderTerminalComponent implements OnInit {
     return (this.posService.tables().find(t => t.id === id) as RestaurantTable) || null;
   });
 
-  public getModalCalculatedPrice = computed<number>(() => {
+ public getModifierGroupsForProduct(product: Product): ModifierGroup[] {
+    const allGroups: ModifierGroup[] = this.posService.inventoryService?.modifierGroups?.() || [];
+    const matched = allGroups.filter((g: ModifierGroup) => product.modifierGroupIds?.includes(g.id));
+
+    if (matched.length > 0) return matched;
+    if (this.isFoodItemWithModifiers(product)) return this.defaultFoodModifiers;
+    if (this.isCoffeeItem(product)) return this.defaultCoffeeModifiers;
+    return [];
+  }
+
+  // 4. Reactive computed signal for the modal template
+  public activeModifierGroups = computed<ModifierGroup[]>(() => {
     const prod = this.selectedProductForModifiers();
-    if (!prod) return 0;
-
-    let total = prod.price;
-    const selections = this.selectedModifierOptions();
-    const groups = this.activeModifierGroups();
-
-    for (const group of groups) {
-      const selectedIds = selections[group.id] || [];
-      for (const optId of selectedIds) {
-        const opt = group.options?.find((o: ModifierOption) => o.id === optId);
-        if (opt?.priceExtra) {
-          total += opt.priceExtra;
-        }
-      }
-    }
-
-    return Number(total.toFixed(2));
+    if (!prod) return [];
+    return this.getModifierGroupsForProduct(prod);
   });
+
+  // 5. Product Click handler
+  public onProductClick(product: Product): void {
+    const tableId = this.activeTableId();
+    if (!tableId) return;
+
+    const groups = this.getModifierGroupsForProduct(product);
+
+    if (groups.length > 0) {
+      this.openModifierModal(product, groups);
+    } else {
+      this.posService.addProductToTableOrder(tableId, product);
+    }
+  }
 
   public filteredProducts = computed(() => {
     const catId = this.selectedCategoryId();
@@ -194,59 +204,27 @@ export class OrderTerminalComponent implements OnInit {
 
 // --- DEFAULT COFFEE MODIFIERS FALLBACK ---
 private isFoodItemWithModifiers(product: Product): boolean {
-    const text = `${product.name} ${product.categoryName || ''}`.toLowerCase();
-    return /τοστ|tost|toast|σάντουιτς|sandwich|burger|club|κλαμπ|μπαγκέτα|baguette|hot dog|ομελέτα/i.test(text);
+    const cat = this.categories().find(c => c.id === product.categoryId);
+    const text = `${product.name} ${product.categoryName || ''} ${cat?.name || ''} ${product.categoryId || ''}`.toLowerCase();
+    
+    return /τοστ|tost|toast|σάντουιτς|sandwich|burger|μπεργκερ|club|κλαμπ|μπαγκέτ|baguette|hot dog|ομελέτ|omelet|φαγητ|food|σνακ|snack|κρέπ|crepe|κρουασάν|croissant|σαλάτ|salad|πίτσ|pizza|τορτίγ|tortilla|wrap|brunch/i.test(text);
   }
 
   // Helper to detect coffee/drink items
   private isCoffeeItem(product: Product): boolean {
-    const text = `${product.name} ${product.categoryName || ''}`.toLowerCase();
-    return /espresso|freddo|cappuccino|latte|nescafe|frappe|ελληνικ|καφέ|coffee|τσάι|tea/i.test(text);
+    const cat = this.categories().find(c => c.id === product.categoryId);
+    const text = `${product.name} ${product.categoryName || ''} ${cat?.name || ''} ${product.categoryId || ''}`.toLowerCase();
+    
+    return /espresso|freddo|cappuccino|latte|nescafe|frappe|ελληνικ|καφέ|coffee|τσάι|tea|beverage/i.test(text);
   }
 
-public activeModifierGroups = computed<ModifierGroup[]>(() => {
-    const prod = this.selectedProductForModifiers();
-    if (!prod) return [];
-
-    const allGroups: ModifierGroup[] = this.posService.inventoryService?.modifierGroups?.() || [];
-    const matched = allGroups.filter((g: ModifierGroup) => prod.modifierGroupIds?.includes(g.id));
-
-    if (matched.length > 0) return matched;
-
-    // Smart Fallbacks if no explicit IDs linked
-    if (this.isFoodItemWithModifiers(prod)) {
-      return this.defaultFoodModifiers;
-    }
-
-    if (this.isCoffeeItem(prod)) {
-      return this.defaultCoffeeModifiers;
-    }
-
-    return [];
-  });
-
-  public onProductClick(product: Product): void {
-    const tableId = this.activeTableId();
-    if (!tableId) return;
-
-    const hasExplicitModifiers = product.modifierGroupIds && product.modifierGroupIds.length > 0;
-    const needsFallback = this.isCoffeeItem(product) || this.isFoodItemWithModifiers(product);
-
-    if (hasExplicitModifiers || needsFallback) {
-      this.openModifierModal(product);
-    } else {
-      // Direct 1-tap addition for simple items (water, beers, sodas, etc.)
-      this.posService.addProductToTableOrder(tableId, product);
-    }
-  }
-
-  public openModifierModal(product: Product): void {
+  public openModifierModal(product: Product, groups?: ModifierGroup[]): void {
     this.selectedProductForModifiers.set(product);
 
+    const activeGroups = groups || this.getModifierGroupsForProduct(product);
     const initialSelections: Record<string, string[]> = {};
-    const groups = this.activeModifierGroups();
 
-    for (const group of groups) {
+    for (const group of activeGroups) {
       if (group.required && group.options && group.options.length > 0) {
         initialSelections[group.id] = [group.options[0].id];
       } else {
@@ -256,6 +234,28 @@ public activeModifierGroups = computed<ModifierGroup[]>(() => {
 
     this.selectedModifierOptions.set(initialSelections);
   }
+
+  // --- CALCULATED PRODUCT PRICE WITH SELECTED MODIFIERS ---
+  public getModalCalculatedPrice = computed<number>(() => {
+    const prod = this.selectedProductForModifiers();
+    if (!prod) return 0;
+
+    let total = prod.price;
+    const selections = this.selectedModifierOptions();
+    const groups = this.activeModifierGroups();
+
+    for (const group of groups) {
+      const selectedIds = selections[group.id] || [];
+      for (const optId of selectedIds) {
+        const opt = group.options?.find((o: ModifierOption) => o.id === optId);
+        if (opt?.priceExtra) {
+          total += opt.priceExtra;
+        }
+      }
+    }
+
+    return Number(total.toFixed(2));
+  });
 
   public closeModifierModal(): void {
     this.selectedProductForModifiers.set(null);
