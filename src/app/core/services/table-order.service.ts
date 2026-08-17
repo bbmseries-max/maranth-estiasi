@@ -248,7 +248,12 @@ export class TableOrderService {
         }
       }
 
-      mergedList.sort((a, b) => (a.number || a.tableNumber || 0) - (b.number || b.tableNumber || 0));
+      mergedList.sort((a, b) => {
+        const valA = String(a.number ?? a.tableNumber ?? '');
+        const valB = String(b.number ?? b.tableNumber ?? '');
+        return valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+      });
+
       this.tables.set(mergedList);
       this.activeOrders.set(extractedActiveOrders);
 
@@ -289,7 +294,7 @@ export class TableOrderService {
     );
   }
 
-  public addTable(data: { number: number; seats?: number; section?: string; zone?: string }): { success: boolean; message: string; table?: Table } {
+  public addTable(data: { number: string | number; seats?: number; section?: string; zone?: string }): { success: boolean; message: string; table?: Table } {
     const num = Number(data.number);
     if (!num || num <= 0) {
       return { success: false, message: 'Ο αριθμός τραπεζιού πρέπει να είναι θετικός ακέραιος.' };
@@ -317,7 +322,11 @@ export class TableOrderService {
       currentTotal: 0
     };
 
-    const updated = [...this.tables(), newTable].sort((a, b) => (a.number || 0) - (b.number || 0));
+    const updated = [...this.tables(), newTable].sort((a, b) => {
+      const valA = String(a.number ?? a.tableNumber ?? '');
+      const valB = String(b.number ?? b.tableNumber ?? '');
+      return valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+    });
     this.tables.set(updated);
 
     if (this.db) {

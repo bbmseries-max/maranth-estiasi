@@ -29,7 +29,7 @@ export interface KdsOrder {
   storeId?: string;
   tenantId?: string;
   orderId?: string;
-  tableNumber: number | string;
+  tableNumber: string | Number;
   waiterName: string;
   createdAt: string | Date;
   status: KdsOrderStatus;

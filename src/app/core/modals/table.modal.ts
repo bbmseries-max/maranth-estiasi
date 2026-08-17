@@ -16,8 +16,8 @@ export interface Table {
   id: string;
   tenantId?: string;             // 👈 Added for multi-tenancy
   storeId?: string;              // 👈 Optional for safe migrations
-  number: number;
-  tableNumber?: number;          // Compatibility alias
+  number: string | number;       // 👈 Updated to support strings like 'A1', 'BAR-1'
+  tableNumber?: string | number; // Compatibility alias
   name?: string;
   seats: number;
   reservation?: TableReservationInfo;

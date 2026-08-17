@@ -7,7 +7,7 @@ import { RestaurantPosService } from '../../core/services/restaurant-pos.service
 import { TableOrderItem, ItemPreparationStatus, OrderStatus } from '../../core/modals';
 
 interface KitchenTicket {
-  tableNumber: number;
+  tableNumber: string | number;
   zone: string;
   tableId: string;
   orderId: string;

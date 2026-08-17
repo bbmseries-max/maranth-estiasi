@@ -284,4 +284,15 @@ public async openReservationPrompt(table: RestaurantTable, event?: Event): Promi
     if (event) event.stopPropagation();
     this.router.navigate(['/order', table.id]);
   }
+
+  /**
+ * Natural sort for alphanumeric table numbers (e.g. A1, A2, A10, B1)
+ */
+public sortTables(tables: RestaurantTable[]): RestaurantTable[] {
+  return [...tables].sort((a, b) => {
+    const valA = String(a.tableNumber ?? a.number ?? '');
+    const valB = String(b.tableNumber ?? b.number ?? '');
+    return valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+  });
+}
 }

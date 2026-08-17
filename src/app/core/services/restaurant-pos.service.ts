@@ -595,7 +595,7 @@ export class RestaurantPosService {
     this.markTableBillPrinted(tableId);
   }
 
-  public addTable(data: { number: number; seats?: number; section?: string; zone?: string }) {
+  public addTable(data: { number: string | number; seats?: number; section?: string; zone?: string }) {
     return this.tableOrderService.addTable(data);
   }
 
