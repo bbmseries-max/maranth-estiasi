@@ -807,4 +807,107 @@ public async cancelReservation(tableId: string): Promise<void> {
     }, { merge: true });
   }
 }
+
+// 1. MOVE / MERGE TABLE
+public moveOrMergeTable(sourceTableId: string, targetTableId: string): { success: boolean; message: string } {
+  const allTables = this.tables();
+  const source = allTables.find(t => t.id === sourceTableId);
+  const target = allTables.find(t => t.id === targetTableId);
+
+  if (!source || !target || !source.activeOrder) {
+    return { success: false, message: 'Μη έγκυρο τραπέζι πηγής ή προορισμού.' };
+  }
+
+  const sourceItems = source.activeOrder.items || [];
+  if (sourceItems.length === 0) {
+    return { success: false, message: 'Το αρχικό τραπέζι δεν έχει ενεργά προϊόντα.' };
+  }
+
+  this.tables.update(list =>
+    list.map(tbl => {
+      // Clear source table
+      if (tbl.id === sourceTableId) {
+        return {
+          ...tbl,
+          status: 'FREE',
+          currentTotal: 0,
+          activeOrder: undefined,
+          waiterName: undefined
+        };
+      }
+
+      // Merge into target table
+      if (tbl.id === targetTableId) {
+        const existingItems = tbl.activeOrder?.items || [];
+        const mergedItems = [...existingItems, ...sourceItems];
+
+        const subtotalNet = mergedItems.reduce((acc, i) => i.status !== 'VOIDED' ? acc + (i.unitPrice * i.quantity) : acc, 0);
+        const grandTotal = mergedItems.reduce((acc, i) => i.status !== 'VOIDED' ? acc + (i.finalItemPrice * i.quantity) : acc, 0);
+        const totalTax = grandTotal - subtotalNet;
+
+        return {
+          ...tbl,
+          status: 'OCCUPIED',
+          currentTotal: grandTotal,
+          activeOrder: {
+            id: tbl.activeOrder?.id || source.activeOrder!.id,
+            tableId: targetTableId,
+            tableNumber: tbl.number,
+            items: mergedItems,
+            subtotalNet,
+            totalTax,
+            grandTotal,
+            status: 'OPEN',
+            createdAt: tbl.activeOrder?.createdAt || source.activeOrder!.createdAt,
+            orderNotes: [tbl.activeOrder?.orderNotes, source.activeOrder?.orderNotes].filter(Boolean).join(' | ')
+          }
+        };
+      }
+
+      return tbl;
+    })
+  );
+
+  return { success: true, message: `Επιτυχής μεταφορά στο Τραπέζι #${target.number || target.tableNumber}` };
+}
+
+// 2. SETTLE PARTIAL BILL (BY SPECIFIC ITEMS)
+public async settlePartialItems(
+  tableId: string, 
+  itemIdsToSettle: string[], 
+  method: 'CASH' | 'CARD'
+): Promise<{ success: boolean; remainingTotal: number }> {
+  const table = this.tables().find(t => t.id === tableId);
+  if (!table || !table.activeOrder) return { success: false, remainingTotal: 0 };
+
+  const allItems = table.activeOrder.items || [];
+  const remainingItems = allItems.filter(i => !itemIdsToSettle.includes(i.id));
+
+  // If all items were paid, close the table
+  if (remainingItems.length === 0 || remainingItems.every(i => i.status === 'VOIDED')) {
+    await this.settleTablePayment(tableId, method);
+    return { success: true, remainingTotal: 0 };
+  }
+
+  // Otherwise, calculate remaining balance and keep table occupied
+  const subtotalNet = remainingItems.reduce((acc, i) => i.status !== 'VOIDED' ? acc + (i.unitPrice * i.quantity) : acc, 0);
+  const grandTotal = remainingItems.reduce((acc, i) => i.status !== 'VOIDED' ? acc + (i.finalItemPrice * i.quantity) : acc, 0);
+  const totalTax = grandTotal - subtotalNet;
+
+  this.tables.update(list =>
+    list.map(tbl => tbl.id === tableId ? {
+      ...tbl,
+      currentTotal: grandTotal,
+      activeOrder: {
+        ...tbl.activeOrder!,
+        items: remainingItems,
+        subtotalNet,
+        totalTax,
+        grandTotal
+      }
+    } : tbl)
+  );
+
+  return { success: true, remainingTotal: grandTotal };
+}
 }

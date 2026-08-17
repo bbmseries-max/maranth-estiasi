@@ -1068,4 +1068,13 @@ public toggleProductPinned(productId: string): void {
       setDoc(doc(this.db, 'auditLogs', newLog.id), cleanUndefined(newLog)).catch(() => {});
     }
   }
+
+  // Inside RestaurantPosService (simple 1-line delegations)
+public moveOrMergeTable(sourceTableId: string, targetTableId: string) {
+  return this.tableOrderService.moveOrMergeTable(sourceTableId, targetTableId);
+}
+
+public settlePartialItems(tableId: string, itemIdsToSettle: string[], method: 'CASH' | 'CARD') {
+  return this.tableOrderService.settlePartialItems(tableId, itemIdsToSettle, method);
+}
 }

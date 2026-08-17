@@ -1,18 +1,18 @@
 import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { MenuSeederService } from '../../core/services/menu-seeder.service';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { TenantContextService } from '../../core/services/tenant-context.service';
+import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
 import { ThermalPrinterService } from '../../core/services/thermal-printer.service';
+import { TenantContextService } from '../../core/services/tenant-context.service';
+import { MenuSeederService } from '../../core/services/menu-seeder.service';
 import { 
   RestaurantTable, 
-  TableOrderItem,
+  TableOrderItem, 
   Product, 
   ModifierGroup, 
   ModifierOption, 
-  SelectedModifier
+  SelectedModifier 
 } from '../../core/modals';
 
 @Component({
@@ -33,7 +33,10 @@ export class OrderTerminalComponent implements OnInit {
   private menuSeeder = inject(MenuSeederService);
   public posService = inject(RestaurantPosService);
 
-  // State Signals
+  // 🔑 CRITICAL: Expose Math to template for Math.max()
+  public Math = Math;
+
+  // Navigation & Search Signals
   public activeTableId = signal<string | null>(null);
   public selectedCategoryId = signal<string>('ALL');
   public searchQuery = '';
@@ -43,9 +46,23 @@ export class OrderTerminalComponent implements OnInit {
   public selectedProductForModifiers = signal<Product | null>(null);
   public selectedModifierOptions = signal<Record<string, string[]>>({});
 
-  // 🔒 Dynamic Reactive POS Signals
+  // 🔄 Transfer Modal Signals
+  public showTransferModal = signal<boolean>(false);
+  public selectedTargetTableId = signal<string>('');
+
+  // ➗ Bill Splitting Signals
+  public showSplitBillModal = signal<boolean>(false);
+  public splitMode = signal<'ITEMS' | 'EQUAL'>('ITEMS');
+  public selectedItemIdsForSplit = signal<string[]>([]);
+  public equalSplitParts = signal<number>(2);
+
+  // Reactive Computed Signals
   public categories = computed(() => this.posService.categories());
   public products = computed(() => this.posService.products());
+
+  public pinnedProducts = computed(() => 
+    this.posService.products().filter(p => p.isPinnedToPOS)
+  );
 
   public activeTable = computed<RestaurantTable | null>(() => {
     const id = this.activeTableId();
@@ -53,36 +70,10 @@ export class OrderTerminalComponent implements OnInit {
     return (this.posService.tables().find(t => t.id === id) as RestaurantTable) || null;
   });
 
- public getModifierGroupsForProduct(product: Product): ModifierGroup[] {
-    const allGroups: ModifierGroup[] = this.posService.inventoryService?.modifierGroups?.() || [];
-    const matched = allGroups.filter((g: ModifierGroup) => product.modifierGroupIds?.includes(g.id));
-
-    if (matched.length > 0) return matched;
-    if (this.isFoodItemWithModifiers(product)) return this.defaultFoodModifiers;
-    if (this.isCoffeeItem(product)) return this.defaultCoffeeModifiers;
-    return [];
-  }
-
-  // 4. Reactive computed signal for the modal template
-  public activeModifierGroups = computed<ModifierGroup[]>(() => {
-    const prod = this.selectedProductForModifiers();
-    if (!prod) return [];
-    return this.getModifierGroupsForProduct(prod);
+  public availableTransferTables = computed(() => {
+    const currentId = this.activeTableId();
+    return this.posService.tables().filter(t => t.id !== currentId);
   });
-
-  // 5. Product Click handler
-  public onProductClick(product: Product): void {
-    const tableId = this.activeTableId();
-    if (!tableId) return;
-
-    const groups = this.getModifierGroupsForProduct(product);
-
-    if (groups.length > 0) {
-      this.openModifierModal(product, groups);
-    } else {
-      this.posService.addProductToTableOrder(tableId, product);
-    }
-  }
 
   public filteredProducts = computed(() => {
     const catId = this.selectedCategoryId();
@@ -110,19 +101,38 @@ export class OrderTerminalComponent implements OnInit {
     return items.filter(i => i.status !== 'VOIDED').length;
   });
 
-  ngOnInit(): void {
-    const tableId = this.route.snapshot.paramMap.get('tableId');
-    if (tableId) {
-      this.activeTableId.set(tableId);
+  public splitSelectedTotal = computed<number>(() => {
+    const table = this.activeTable();
+    if (!table?.activeOrder?.items) return 0;
+    const selectedIds = this.selectedItemIdsForSplit();
+
+    return table.activeOrder.items
+      .filter(i => selectedIds.includes(i.id) && i.status !== 'VOIDED')
+      .reduce((sum, i) => sum + (i.finalItemPrice * i.quantity), 0);
+  });
+
+  public getModalCalculatedPrice = computed<number>(() => {
+    const prod = this.selectedProductForModifiers();
+    if (!prod) return 0;
+
+    let total = prod.price;
+    const selections = this.selectedModifierOptions();
+    const groups = this.activeModifierGroups();
+
+    for (const group of groups) {
+      const selectedIds = selections[group.id] || [];
+      for (const optId of selectedIds) {
+        const opt = group.options?.find((o: ModifierOption) => o.id === optId);
+        if (opt?.priceExtra) {
+          total += opt.priceExtra;
+        }
+      }
     }
 
-    // 🔒 Only seed if in demo mode and inventory is completely empty
-    const currentTenant = localStorage.getItem('active_tenant_id') || this.tenantContext.currentTenantId();
-    if (currentTenant === 'coffee-shop-demo' && this.posService.products().length === 0) {
-      this.menuSeeder.seedCoffeeShopTenant(false);
-    }
-  }
+    return Number(total.toFixed(2));
+  });
 
+  // --- DEFAULT MODIFIERS ---
   private defaultCoffeeModifiers: ModifierGroup[] = [
     {
       id: 'grp_sweetness',
@@ -162,7 +172,6 @@ export class OrderTerminalComponent implements OnInit {
     }
   ];
 
-  // --- 🥪 DEFAULT FOOD / TOAST / SANDWICH MODIFIERS ---
   private defaultFoodModifiers: ModifierGroup[] = [
     {
       id: 'grp_bread',
@@ -202,25 +211,56 @@ export class OrderTerminalComponent implements OnInit {
     }
   ];
 
-// --- DEFAULT COFFEE MODIFIERS FALLBACK ---
-private isFoodItemWithModifiers(product: Product): boolean {
+  private isFoodItemWithModifiers(product: Product): boolean {
     const cat = this.categories().find(c => c.id === product.categoryId);
-    const text = `${product.name} ${product.categoryName || ''} ${cat?.name || ''} ${product.categoryId || ''}`.toLowerCase();
-    
-    return /τοστ|tost|toast|σάντουιτς|sandwich|burger|μπεργκερ|club|κλαμπ|μπαγκέτ|baguette|hot dog|ομελέτ|omelet|φαγητ|food|σνακ|snack|κρέπ|crepe|κρουασάν|croissant|σαλάτ|salad|πίτσ|pizza|τορτίγ|tortilla|wrap|brunch/i.test(text);
+    const text = `${product.name} ${product.categoryName || ''} ${cat?.name || ''}`.toLowerCase();
+    return /τοστ|tost|toast|σάντουιτς|sandwich|burger|club|κλαμπ|μπαγκέτ|baguette|hot dog|ομελέτ|omelet|φαγητ|food|σνακ|snack|κρέπ|crepe|κρουασάν|croissant|σαλάτ|salad|πίτσ|pizza|τορτίγ|tortilla|wrap|brunch/i.test(text);
   }
 
-  // Helper to detect coffee/drink items
   private isCoffeeItem(product: Product): boolean {
     const cat = this.categories().find(c => c.id === product.categoryId);
-    const text = `${product.name} ${product.categoryName || ''} ${cat?.name || ''} ${product.categoryId || ''}`.toLowerCase();
-    
-    return /espresso|freddo|cappuccino|latte|nescafe|frappe|ελληνικ|καφέ|coffee|τσάι|tea|beverage/i.test(text);
+    const text = `${product.name} ${product.categoryName || ''} ${cat?.name || ''}`.toLowerCase();
+    return /espresso|freddo|cappuccino|latte|nescafe|frappe|ελληνικ|καφέ|coffee|τσάι|tea/i.test(text);
+  }
+
+  public getModifierGroupsForProduct(product: Product): ModifierGroup[] {
+    const allGroups: ModifierGroup[] = this.posService.inventoryService?.modifierGroups?.() || [];
+    const matched = allGroups.filter((g: ModifierGroup) => product.modifierGroupIds?.includes(g.id));
+
+    if (matched.length > 0) return matched;
+    if (this.isFoodItemWithModifiers(product)) return this.defaultFoodModifiers;
+    if (this.isCoffeeItem(product)) return this.defaultCoffeeModifiers;
+    return [];
+  }
+
+  public activeModifierGroups = computed<ModifierGroup[]>(() => {
+    const prod = this.selectedProductForModifiers();
+    if (!prod) return [];
+    return this.getModifierGroupsForProduct(prod);
+  });
+
+  ngOnInit(): void {
+    const tableId = this.route.snapshot.paramMap.get('tableId');
+    if (tableId) {
+      this.activeTableId.set(tableId);
+    }
+  }
+
+  // --- ACTIONS ---
+  public onProductClick(product: Product): void {
+    const tableId = this.activeTableId();
+    if (!tableId) return;
+
+    const groups = this.getModifierGroupsForProduct(product);
+    if (groups.length > 0) {
+      this.openModifierModal(product, groups);
+    } else {
+      this.posService.addProductToTableOrder(tableId, product);
+    }
   }
 
   public openModifierModal(product: Product, groups?: ModifierGroup[]): void {
     this.selectedProductForModifiers.set(product);
-
     const activeGroups = groups || this.getModifierGroupsForProduct(product);
     const initialSelections: Record<string, string[]> = {};
 
@@ -231,31 +271,8 @@ private isFoodItemWithModifiers(product: Product): boolean {
         initialSelections[group.id] = [];
       }
     }
-
     this.selectedModifierOptions.set(initialSelections);
   }
-
-  // --- CALCULATED PRODUCT PRICE WITH SELECTED MODIFIERS ---
-  public getModalCalculatedPrice = computed<number>(() => {
-    const prod = this.selectedProductForModifiers();
-    if (!prod) return 0;
-
-    let total = prod.price;
-    const selections = this.selectedModifierOptions();
-    const groups = this.activeModifierGroups();
-
-    for (const group of groups) {
-      const selectedIds = selections[group.id] || [];
-      for (const optId of selectedIds) {
-        const opt = group.options?.find((o: ModifierOption) => o.id === optId);
-        if (opt?.priceExtra) {
-          total += opt.priceExtra;
-        }
-      }
-    }
-
-    return Number(total.toFixed(2));
-  });
 
   public closeModifierModal(): void {
     this.selectedProductForModifiers.set(null);
@@ -277,7 +294,6 @@ private isFoodItemWithModifiers(product: Product): boolean {
       }
       current[groupId] = groupSelections;
     }
-
     this.selectedModifierOptions.set(current);
   }
 
@@ -318,7 +334,6 @@ private isFoodItemWithModifiers(product: Product): boolean {
 
     this.closeModifierModal();
   }
-  // --- TABLE ACTIONS ---
 
   public hasPendingItems(): boolean {
     return this.pendingItemsCount() > 0;
@@ -358,18 +373,13 @@ private isFoodItemWithModifiers(product: Product): boolean {
       this.posService.updateOrderNotes(tableId, notes);
     }
   }
-  
+
   public async settlePayment(method: 'CASH' | 'CARD'): Promise<void> {
     const tableId = this.activeTableId();
     if (!tableId) return;
 
-    // ⛔ STRICT GUARD: Block settlement if items haven't been sent to the kitchen/bar
     if (this.hasPendingItems()) {
-      alert(
-        `⛔ ΑΠΑΓΟΡΕΥΕΤΑΙ Η ΕΞΟΦΛΗΣΗ!\n\n` +
-        `Υπάρχουν ${this.pendingItemsCount()} προϊόντα που δεν έχουν σταλεί στην κουζίνα / bar.\n` +
-        `Παρακαλώ πατήστε πρώτα "Αποστολή" στην κουζίνα πριν την είσπραξη!`
-      );
+      alert('⛔ Παρακαλώ πατήστε πρώτα "Αποστολή" στην κουζίνα πριν την είσπραξη!');
       return;
     }
 
@@ -389,30 +399,82 @@ private isFoodItemWithModifiers(product: Product): boolean {
   }
 
   public printBill(): void {
-  const table = this.activeTable();
-  if (!table) return;
+    const table = this.activeTable();
+    if (!table) return;
 
-  const items = table.activeOrder?.items || [];
-  const total = Number(table.activeOrder?.grandTotal || table.currentTotal || 0);
-  const waiter = table.waiterName || this.posService.currentEmployee()?.name || 'Σερβιτόρος';
+    const items = table.activeOrder?.items || [];
+    const total = Number(table.activeOrder?.grandTotal || table.currentTotal || 0);
+    const waiter = table.waiterName || this.posService.currentEmployee()?.name || 'Σερβιτόρος';
 
-  if (items.length === 0 || total <= 0) {
-    alert('⚠️ Δεν υπάρχουν προϊόντα στην παραγγελία για εκτύπωση λογαριασμού.');
-    return;
+    if (items.length === 0 || total <= 0) {
+      alert('⚠️ Δεν υπάρχουν προϊόντα στην παραγγελία για εκτύπωση λογαριασμού.');
+      return;
+    }
+
+    this.printerService.printTableBillReceipt(
+      table.number || table.tableNumber || 1,
+      table.name || `Τραπέζι ${table.number}`,
+      items,
+      total,
+      waiter
+    );
+
+    this.posService.printTableBill(table.id);
   }
 
-  // 1. Trigger thermal receipt print window
-  this.printerService.printTableBillReceipt(
-    table.number || table.tableNumber || 1,
-    table.name || `Τραπέζι ${table.number}`,
-    items,
-    total,
-    waiter
-  );
+  // --- 🔄 TRANSFER ACTIONS ---
+  public openTransferModal(): void {
+    this.selectedTargetTableId.set('');
+    this.showTransferModal.set(true);
+  }
 
-  // 2. Mark table status as BILL_PRINTED in Firestore & local state
-  this.posService.printTableBill(table.id);
-}
+  public confirmTableTransfer(): void {
+    const sourceId = this.activeTableId();
+    const targetId = this.selectedTargetTableId();
+    if (!sourceId || !targetId) return;
+
+    const res = this.posService.moveOrMergeTable(sourceId, targetId);
+    alert(res.message);
+
+    if (res.success) {
+      this.showTransferModal.set(false);
+      this.router.navigate(['/order-terminal', targetId]);
+    }
+  }
+
+  // --- ➗ SPLIT ACTIONS ---
+  public openSplitModal(): void {
+    this.selectedItemIdsForSplit.set([]);
+    this.equalSplitParts.set(2);
+    this.splitMode.set('ITEMS');
+    this.showSplitBillModal.set(true);
+  }
+
+  public toggleSplitItem(itemId: string): void {
+    const current = [...this.selectedItemIdsForSplit()];
+    const index = current.indexOf(itemId);
+    if (index > -1) {
+      current.splice(index, 1);
+    } else {
+      current.push(itemId);
+    }
+    this.selectedItemIdsForSplit.set(current);
+  }
+
+  public async settleSplitItems(method: 'CASH' | 'CARD'): Promise<void> {
+    const tableId = this.activeTableId();
+    const itemIds = this.selectedItemIdsForSplit();
+    if (!tableId || itemIds.length === 0) return;
+
+    const res = await this.posService.settlePartialItems(tableId, itemIds, method);
+    if (res.success) {
+      this.selectedItemIdsForSplit.set([]);
+      this.showSplitBillModal.set(false);
+      if (res.remainingTotal === 0) {
+        this.router.navigate(['/floor-plan'], { replaceUrl: true });
+      }
+    }
+  }
 
   // --- STYLING HELPERS ---
   public getItemCardBorderClass(status: string): string {
@@ -446,10 +508,15 @@ private isFoodItemWithModifiers(product: Product): boolean {
       case 'VOIDED': return 'Ακυρώθηκε';
       default: return status;
     }
-
   }
 
-  public pinnedProducts = computed(() => 
-  this.posService.products().filter(p => p.isPinnedToPOS)
-);
+  public decrementSplitParts(): void {
+    if (this.equalSplitParts() > 2) {
+      this.equalSplitParts.update(val => val - 1);
+    }
+  }
+
+  public incrementSplitParts(): void {
+    this.equalSplitParts.update(val => val + 1);
+  }
 }
