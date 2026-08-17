@@ -631,17 +631,16 @@
         </div>
 
         <!-- 📌 PIN / FAVORITE TOGGLE BUTTON -->
-        <button 
-          type="button"
-          (click)="posService.toggleProductPinned(targetProd.id)"
-          [title]="targetProd.isPinnedToPOS ? 'Ξεκαρφίτσωμα από τα Αγαπημένα' : 'Καρφίτσωμα στα Αγαπημένα'"
-          class="w-full py-2.5 px-3 rounded-xl transition-all text-xs font-bold flex items-center justify-center gap-2 cursor-pointer border"
-          [ngClass]="targetProd.isPinnedToPOS 
-            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm' 
-            : 'bg-slate-900 text-slate-400 hover:text-slate-200 border-slate-700'">
-          <span>{{ targetProd.isPinnedToPOS ? '⭐' : '☆' }}</span>
-          <span>{{ targetProd.isPinnedToPOS ? 'Καρφιτσωμένο στα Αγαπημένα (Favorites)' : 'Καρφίτσωμα στα Αγαπημένα' }}</span>
-        </button>
+       <button 
+  type="button"
+  (click)="editProdIsPined = !editProdIsPined"
+  class="w-full py-2.5 px-3 rounded-xl transition-all text-xs font-bold flex items-center justify-center gap-2 cursor-pointer border"
+  [ngClass]="editProdIsPined 
+    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm' 
+    : 'bg-slate-900 text-slate-400 hover:text-slate-200 border-slate-700'">
+  <span>{{ editProdIsPined ? '⭐' : '☆' }}</span>
+  <span>{{ editProdIsPined ? 'Καρφιτσωμένο στα Αγαπημένα (Favorites)' : 'Καρφίτσωμα στα Αγαπημένα' }}</span>
+</button>
 
         <div class="grid grid-cols-2 gap-3">
           <div class="flex flex-col gap-1">

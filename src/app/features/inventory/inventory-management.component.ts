@@ -59,6 +59,7 @@ export class InventoryManagementComponent {
   public editProdPrice = 0;
   public editProdCost = 0;
   public editProdVat = 13;
+  public editProdIsPined = false;
 
   // Table Modal Fields
   public showTableModal = signal<boolean>(false);
@@ -178,6 +179,7 @@ export class InventoryManagementComponent {
     this.editProdPrice = prod.price;
     this.editProdCost = prod.purchasePrice || prod.costPrice || 0;
     this.editProdVat = prod.taxRate || 13;
+    this.editProdIsPined = !!prod.isPinnedToPOS;
   }
 
   public saveProductEdit(): void {
@@ -189,7 +191,8 @@ export class InventoryManagementComponent {
   categoryId: this.editProdCategoryId,
   price: Number(this.editProdPrice) || 0,
   costPrice: Number(this.editProdCost) || 0,
-  taxRate: (Number(this.editProdVat) || 13) as GreekVatRate // 👈 Cast as GreekVatRate
+  taxRate: (Number(this.editProdVat) || 13) as GreekVatRate,
+  isPinnedToPOS: this.editProdIsPined
 });
 
     this.editingProduct.set(null);
@@ -230,42 +233,36 @@ export class InventoryManagementComponent {
     this.showTableModal.set(true);
   }
 
-public saveTableDetails(): void {
-    const targetId = this.editingTableId();
-    const cleanNumber = this.tableNumberInput.trim().toUpperCase();
+ public saveTableDetails(): void {
+  const targetId = this.editingTableId();
+  // Map Greek UI zones to English sections if needed
+  const section = this.tableZoneInput === 'Αυλή' ? 'OUTDOOR' : this.tableZoneInput === 'Bar' ? 'BAR' : this.tableZoneInput === 'VIP' ? 'VIP' : 'INDOOR';
 
-    if (!cleanNumber) {
-      this.tableErrorMessage.set('Ο αριθμός / κωδικός τραπεζιού είναι υποχρεωτικός.');
-      return;
-    }
+  if (targetId) {
+    // 👈 Removed 'capacity' and 'tableNumber'
+    this.posService.updateTable(targetId, {
+      number: this.tableNumberInput,
+      seats: this.tableSeatsInput,
+      zone: this.tableZoneInput,
+      section: section
+    });
+    this.showTableModal.set(false);
+  } else {
+    // 👈 Removed 'capacity'
+    const result = this.posService.addTable({
+      number: this.tableNumberInput,
+      seats: this.tableSeatsInput,
+      zone: this.tableZoneInput,
+      section: section
+    });
 
-    const section = this.tableZoneInput === 'Αυλή' ? 'OUTDOOR' : 
-                    this.tableZoneInput === 'Bar' ? 'BAR' : 
-                    this.tableZoneInput === 'VIP' ? 'VIP' : 'INDOOR';
-
-    if (targetId) {
-      this.posService.updateTable(targetId, {
-        number: cleanNumber,
-        seats: Number(this.tableSeatsInput) || 4,
-        zone: this.tableZoneInput,
-        section: section
-      });
+    if (result.success) {
       this.showTableModal.set(false);
     } else {
-      const result = this.posService.addTable({
-        number: cleanNumber,
-        seats: Number(this.tableSeatsInput) || 4,
-        zone: this.tableZoneInput,
-        section: section
-      });
-
-      if (result.success) {
-        this.showTableModal.set(false);
-      } else {
-        this.tableErrorMessage.set(result.message);
-      }
+      this.tableErrorMessage.set(result.message);
     }
   }
+}
 
   public deleteTable(id: string): void {
     if (confirm('Διαγραφή τραπεζιού;')) {
