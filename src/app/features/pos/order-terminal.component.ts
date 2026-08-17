@@ -428,17 +428,25 @@ export class OrderTerminalComponent implements OnInit {
     this.showTransferModal.set(true);
   }
 
-  public confirmTableTransfer(): void {
+ public async confirmTableTransfer(): Promise<void> {
     const sourceId = this.activeTableId();
     const targetId = this.selectedTargetTableId();
     if (!sourceId || !targetId) return;
 
-    const res = this.posService.moveOrMergeTable(sourceId, targetId);
-    alert(res.message);
+    const res = await this.posService.moveOrMergeTable(
+      sourceId, 
+      targetId
+    );
+
+    this.showTransferModal.set(false);
 
     if (res.success) {
-      this.showTransferModal.set(false);
-      this.router.navigate(['/order-terminal', targetId]);
+      // 1. Explicitly switch active table signal first
+      this.activeTableId.set(targetId);
+      // 2. Navigate cleanly with replaceUrl to avoid route state stacking
+      this.router.navigate(['/order-terminal', targetId], { replaceUrl: true });
+    } else {
+      alert(res.message);
     }
   }
 

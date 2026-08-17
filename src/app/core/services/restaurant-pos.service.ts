@@ -1136,7 +1136,7 @@ export class RestaurantPosService {
 
   // --- TABLE TRANSFER & PARTIAL SETTLEMENT DELEGATES ---
   public moveOrMergeTable(sourceTableId: string, targetTableId: string) {
-    return this.tableOrderService.moveOrMergeTable(sourceTableId, targetTableId);
+    return this.tableOrderService.moveOrMergeTable(sourceTableId, targetTableId, this.currentEmployee());
   }
 
   public settlePartialItems(tableId: string, itemIdsToSettle: string[], method: 'CASH' | 'CARD') {

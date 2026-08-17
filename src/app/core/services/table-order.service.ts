@@ -64,6 +64,18 @@ function safeFirestorePayload(obj: any): any {
   return copy;
 }
 
+function cleanUndefined(obj: any): any {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(cleanUndefined);
+  const copy: any = {};
+  for (const key of Object.keys(obj)) {
+    if (obj[key] !== undefined) {
+      copy[key] = cleanUndefined(obj[key]);
+    }
+  }
+  return copy;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -809,7 +821,12 @@ public async cancelReservation(tableId: string): Promise<void> {
 }
 
 // 1. MOVE / MERGE TABLE
-public moveOrMergeTable(sourceTableId: string, targetTableId: string): { success: boolean; message: string } {
+// 🔄 PERSISTENT TABLE MOVE / MERGE
+public async moveOrMergeTable(
+  sourceTableId: string, 
+  targetTableId: string, 
+  currentEmp?: Employee | null
+): Promise<{ success: boolean; message: string }> {
   const allTables = this.tables();
   const source = allTables.find(t => t.id === sourceTableId);
   const target = allTables.find(t => t.id === targetTableId);
@@ -823,56 +840,72 @@ public moveOrMergeTable(sourceTableId: string, targetTableId: string): { success
     return { success: false, message: 'Το αρχικό τραπέζι δεν έχει ενεργά προϊόντα.' };
   }
 
+  // 1. Prepare Target Items (Existing + Source items, avoiding duplicate IDs)
+  const existingTargetItems = target.activeOrder?.items || [];
+  const mergedItems = [...existingTargetItems, ...sourceItems];
+
+  const subtotalNet = mergedItems.reduce((acc, i) => i.status !== 'VOIDED' ? acc + (i.unitPrice * i.quantity) : acc, 0);
+  const grandTotal = mergedItems.reduce((acc, i) => i.status !== 'VOIDED' ? acc + (i.finalItemPrice * i.quantity) : acc, 0);
+  const totalTax = grandTotal - subtotalNet;
+
+  const baseActiveOrder = target.activeOrder || source.activeOrder!;
+  const targetTableNum = target.number ?? target.tableNumber ?? target.id;
+  const sourceTableNum = source.number ?? source.tableNumber ?? source.id;
+
+  // 2. Build Updated Target Table Object
+  const updatedTargetTable: Table = {
+    ...target,
+    status: 'OCCUPIED',
+    currentTotal: grandTotal,
+    assignedWaiterName: target.assignedWaiterName || source.assignedWaiterName || currentEmp?.name,
+    activeOrder: {
+      ...baseActiveOrder,
+      orderId: baseActiveOrder.orderId || `ord_${Date.now()}`,
+      openedAt: baseActiveOrder.openedAt || new Date().toISOString(),
+      tableId: targetTableId,
+      tableNumber: targetTableNum,
+      items: mergedItems,
+      subtotalNet,
+      totalTax,
+      grandTotal,
+      status: 'OPEN'
+    } as any
+  };
+
+  // 3. Build Cleared Source Table Object
+  const clearedSourceTable: Table = {
+    ...source,
+    status: 'FREE',
+    currentTotal: 0,
+    activeOrder: undefined,
+    assignedWaiterName: undefined
+  };
+
+  // 4. Update Local Memory State
   this.tables.update((list: Table[]) =>
     list.map((tbl: Table): Table => {
-      // Clear source table
-      if (tbl.id === sourceTableId) {
-        return {
-          ...tbl,
-          status: 'FREE',
-          currentTotal: 0,
-          activeOrder: undefined,
-          assignedWaiterName: undefined
-        } as Table;
-      }
-
-      // Merge into target table
-      if (tbl.id === targetTableId) {
-        const existingItems = tbl.activeOrder?.items || [];
-        const mergedItems = [...existingItems, ...sourceItems];
-
-        const subtotalNet = mergedItems.reduce((acc, i) => i.status !== 'VOIDED' ? acc + (i.unitPrice * i.quantity) : acc, 0);
-        const grandTotal = mergedItems.reduce((acc, i) => i.status !== 'VOIDED' ? acc + (i.finalItemPrice * i.quantity) : acc, 0);
-        const totalTax = grandTotal - subtotalNet;
-
-        const baseActiveOrder = tbl.activeOrder || source.activeOrder!;
-
-        const updatedOrder = {
-          ...baseActiveOrder,
-          orderId: baseActiveOrder.orderId || (baseActiveOrder as any).id || `ord_${Date.now()}`,
-          openedAt: baseActiveOrder.openedAt || new Date().toISOString(),
-          tableId: targetTableId,
-          tableNumber: tbl.number ?? tbl.tableNumber ?? '',
-          items: mergedItems,
-          subtotalNet,
-          totalTax,
-          grandTotal,
-          status: 'OPEN'
-        };
-
-        return {
-          ...tbl,
-          status: 'OCCUPIED',
-          currentTotal: grandTotal,
-          activeOrder: updatedOrder as any
-        } as Table;
-      }
-
+      if (tbl.id === sourceTableId) return clearedSourceTable;
+      if (tbl.id === targetTableId) return updatedTargetTable;
       return tbl;
     })
   );
 
-  return { success: true, message: `Επιτυχής μεταφορά στο Τραπέζι #${target.number ?? target.tableNumber}` };
+  // 5. 🔑 CRITICAL: Persist BOTH tables to Firestore so Firebase listeners do NOT roll back
+  if (this.db) {
+    try {
+      await Promise.all([
+        setDoc(doc(this.db, 'tables', sourceTableId), cleanUndefined(clearedSourceTable), { merge: false }),
+        setDoc(doc(this.db, 'tables', targetTableId), cleanUndefined(updatedTargetTable), { merge: true })
+      ]);
+    } catch (err) {
+      console.error('Error persisting table move/merge to Firestore:', err);
+    }
+  }
+
+  return { 
+    success: true, 
+    message: `Επιτυχής μεταφορά από #${sourceTableNum} στο #${targetTableNum}` 
+  };
 }
 
 // 2. SETTLE PARTIAL BILL
