@@ -399,4 +399,8 @@ export class OrderTerminalComponent implements OnInit {
     }
 
   }
+
+  public pinnedProducts = computed(() => 
+  this.posService.products().filter(p => p.isPinnedToPOS)
+);
 }

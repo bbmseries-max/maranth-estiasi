@@ -63,6 +63,31 @@
   </div>
 </div>
 
+<!-- ⭐ PINNED / QUICK ACCESS FAVORITES BAR -->
+@if (posService.pinnedProducts().length > 0) {
+  <div class="px-3 pt-2 pb-1.5 bg-slate-900/80 border-b border-slate-800">
+    <div class="flex items-center justify-between text-[11px] font-black tracking-wider text-amber-400 uppercase mb-1.5">
+      <span class="flex items-center gap-1.5">⚡ Δημοφιλή / Favorites</span>
+      <span class="text-slate-500 font-bold text-[10px]">{{ posService.pinnedProducts().length }}</span>
+    </div>
+
+    <!-- Horizontal Swipeable Pill Row -->
+    <div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar scroll-smooth">
+      @for (prod of posService.pinnedProducts(); track prod.id) {
+        <button 
+          type="button"
+          (click)="onProductClick(prod)"
+          class="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 border border-amber-500/30 shadow-md transition-all cursor-pointer">
+          <span class="text-xs font-bold text-white whitespace-nowrap">{{ prod.name }}</span>
+          <span class="text-[11px] font-black text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-md">
+            {{ prod.price | currency:'EUR':'symbol':'1.2-2' }}
+          </span>
+        </button>
+      }
+    </div>
+  </div>
+}
+
 <!-- PRODUCTS GRID LOOP -->
 <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mt-4">
   @for (product of filteredProducts(); track product.id) {

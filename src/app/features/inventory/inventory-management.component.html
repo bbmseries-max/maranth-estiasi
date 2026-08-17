@@ -605,67 +605,80 @@
         </div>
       }
 
-      <!-- MODAL 3: EDIT PRODUCT -->
-      @if (editingProduct(); as targetProd) {
-        <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div class="bg-slate-800 border border-slate-700 rounded-3xl p-6 w-full max-w-md shadow-2xl flex flex-col gap-4">
-            <div class="flex justify-between items-center border-b border-slate-700 pb-3">
-              <h3 class="text-lg font-black text-white m-0">✏️ Επεξεργασία Προϊόντος</h3>
-              <button (click)="editingProduct.set(null)" class="text-slate-400 hover:text-white text-xl cursor-pointer">✕</button>
-            </div>
+    <!-- MODAL 3: EDIT PRODUCT -->
+@if (editingProduct(); as targetProd) {
+  <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-800 border border-slate-700 rounded-3xl p-6 w-full max-w-md shadow-2xl flex flex-col gap-4">
+      <div class="flex justify-between items-center border-b border-slate-700 pb-3">
+        <h3 class="text-lg font-black text-white m-0">✏️ Επεξεργασία Προϊόντος</h3>
+        <button (click)="editingProduct.set(null)" class="text-slate-400 hover:text-white text-xl cursor-pointer">✕</button>
+      </div>
 
-            <div class="flex flex-col gap-3">
-              <div class="flex flex-col gap-1">
-                <label class="text-[11px] font-bold text-slate-400 uppercase">Όνομα Προϊόντος</label>
-                <input type="text" [(ngModel)]="editProdName"
-                       class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400" />
-              </div>
+      <div class="flex flex-col gap-3">
+        <div class="flex flex-col gap-1">
+          <label class="text-[11px] font-bold text-slate-400 uppercase">Όνομα Προϊόντος</label>
+          <input type="text" [(ngModel)]="editProdName"
+                 class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400" />
+        </div>
 
-              <div class="flex flex-col gap-1">
-                <label class="text-[11px] font-bold text-slate-400 uppercase">Κατηγορία</label>
-                <select [(ngModel)]="editProdCategoryId" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400">
-                  @for (cat of posService.categories(); track cat.id) {
-                    <option [value]="cat.id">{{ cat.icon }} {{ cat.name }}</option>
-                  }
-                </select>
-              </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-[11px] font-bold text-slate-400 uppercase">Κατηγορία</label>
+          <select [(ngModel)]="editProdCategoryId" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400">
+            @for (cat of posService.categories(); track cat.id) {
+              <option [value]="cat.id">{{ cat.icon }} {{ cat.name }}</option>
+            }
+          </select>
+        </div>
 
-              <div class="grid grid-cols-2 gap-3">
-                <div class="flex flex-col gap-1">
-                  <label class="text-[11px] font-bold text-slate-400 uppercase">Τιμή Πώλησης (€)</label>
-                  <input type="number" step="0.1" [(ngModel)]="editProdPrice"
-                         class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-emerald-400 font-bold focus:outline-none focus:border-amber-400" />
-                </div>
+        <!-- 📌 PIN / FAVORITE TOGGLE BUTTON -->
+        <button 
+          type="button"
+          (click)="posService.toggleProductPinned(targetProd.id)"
+          [title]="targetProd.isPinnedToPOS ? 'Ξεκαρφίτσωμα από τα Αγαπημένα' : 'Καρφίτσωμα στα Αγαπημένα'"
+          class="w-full py-2.5 px-3 rounded-xl transition-all text-xs font-bold flex items-center justify-center gap-2 cursor-pointer border"
+          [ngClass]="targetProd.isPinnedToPOS 
+            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm' 
+            : 'bg-slate-900 text-slate-400 hover:text-slate-200 border-slate-700'">
+          <span>{{ targetProd.isPinnedToPOS ? '⭐' : '☆' }}</span>
+          <span>{{ targetProd.isPinnedToPOS ? 'Καρφιτσωμένο στα Αγαπημένα (Favorites)' : 'Καρφίτσωμα στα Αγαπημένα' }}</span>
+        </button>
 
-                <div class="flex flex-col gap-1">
-                  <label class="text-[11px] font-bold text-slate-400 uppercase">Κόστος Αγοράς (€)</label>
-                  <input type="number" step="0.1" [(ngModel)]="editProdCost"
-                         class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-bold focus:outline-none focus:border-amber-400" />
-                </div>
-              </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="flex flex-col gap-1">
+            <label class="text-[11px] font-bold text-slate-400 uppercase">Τιμή Πώλησης (€)</label>
+            <input type="number" step="0.1" [(ngModel)]="editProdPrice"
+                   class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-emerald-400 font-bold focus:outline-none focus:border-amber-400" />
+          </div>
 
-              <div class="flex flex-col gap-1">
-                <label class="text-[11px] font-bold text-slate-400 uppercase">Συντελεστής ΦΠΑ</label>
-                <select [(ngModel)]="editProdVat" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400">
-                  <option [ngValue]="13">13% (Εστίαση & Καφέδες)</option>
-                  <option [ngValue]="24">24% (Ποτά & Αλκοόλ)</option>
-                  <option [ngValue]="6">6% (Υπερμειωμένος)</option>
-                  <option [ngValue]="0">0% (Απαλλαγή)</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="flex gap-2 pt-2 border-t border-slate-700">
-              <button (click)="editingProduct.set(null)" class="flex-1 py-3 rounded-xl bg-slate-700 hover:bg-slate-600 font-bold text-slate-200 text-xs cursor-pointer">
-                Ακύρωση
-              </button>
-              <button (click)="saveProductEdit()" [disabled]="!editProdName.trim() || editProdPrice <= 0" class="flex-1 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 font-black text-slate-950 text-xs shadow-md cursor-pointer">
-                ✓ Αποθήκευση Αλλαγών
-              </button>
-            </div>
+          <div class="flex flex-col gap-1">
+            <label class="text-[11px] font-bold text-slate-400 uppercase">Κόστος Αγοράς (€)</label>
+            <input type="number" step="0.1" [(ngModel)]="editProdCost"
+                   class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-bold focus:outline-none focus:border-amber-400" />
           </div>
         </div>
-      }
+
+        <div class="flex flex-col gap-1">
+          <label class="text-[11px] font-bold text-slate-400 uppercase">Συντελεστής ΦΠΑ</label>
+          <select [(ngModel)]="editProdVat" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400">
+            <option [ngValue]="13">13% (Εστίαση &amp; Καφέδες)</option>
+            <option [ngValue]="24">24% (Ποτά &amp; Αλκοόλ)</option>
+            <option [ngValue]="6">6% (Υπερμειωμένος)</option>
+            <option [ngValue]="0">0% (Απαλλαγή)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="flex gap-2 pt-2 border-t border-slate-700">
+        <button (click)="editingProduct.set(null)" class="flex-1 py-3 rounded-xl bg-slate-700 hover:bg-slate-600 font-bold text-slate-200 text-xs cursor-pointer">
+          Ακύρωση
+        </button>
+        <button (click)="saveProductEdit()" [disabled]="!editProdName.trim() || editProdPrice <= 0" class="flex-1 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 font-black text-slate-950 text-xs shadow-md cursor-pointer">
+          ✓ Αποθήκευση Αλλαγών
+        </button>
+      </div>
+    </div>
+  </div>
+}
 
       <!-- MODAL 4: ADD OR EDIT TABLE -->
       @if (showTableModal()) {

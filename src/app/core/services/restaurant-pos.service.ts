@@ -367,6 +367,21 @@ export class RestaurantPosService {
     this.tableOrderService.dismissNotification(idOrIndex);
   }
 
+  // 1. Computed list of pinned items
+public pinnedProducts = computed(() => 
+  this.products().filter(p => p.isPinnedToPOS === true)
+);
+
+// 2. 1-tap Toggle method for Admin/Manager
+public toggleProductPinned(productId: string): void {
+  this.products.update(list =>
+    list.map(prod => 
+      prod.id === productId ? { ...prod, isPinnedToPOS: !prod.isPinnedToPOS } : prod
+    )
+  );
+  // Persist to local storage or Firestore if applicable
+}
+
   // --- AUTH & STAFF DELEGATES ---
   public async loginWithPin(pin: string): Promise<Employee | null> {
     const result: any = await this.authShiftService.loginWithPin(pin);
