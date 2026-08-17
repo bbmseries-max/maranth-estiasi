@@ -63,25 +63,34 @@
   </div>
 </div>
 
-<!-- ⭐ PINNED / QUICK ACCESS FAVORITES BAR -->
+<!-- ⭐ PINNED / QUICK ACCESS FAVORITES (GRID BEHAVIOR) -->
 @if (pinnedProducts().length > 0) {
-  <div class="w-full min-w-0 max-w-full px-3 py-2 bg-slate-900/90 border-b border-slate-800 shrink-0">
+  <div class="w-full bg-slate-900/90 border border-slate-800/80 rounded-2xl p-3 shrink-0">
     <div class="flex items-center justify-between text-[11px] font-black tracking-wider text-amber-400 uppercase mb-2">
       <span class="flex items-center gap-1.5">⚡ Δημοφιλή / Favorites</span>
       <span class="text-slate-500 font-bold text-[10px]">{{ pinnedProducts().length }}</span>
     </div>
 
-    <!-- Responsive Horizontal Scroll Track -->
-    <div class="flex items-center gap-2 overflow-x-auto w-full min-w-0 pb-1.5 pt-0.5 touch-pan-x scroll-smooth hide-scrollbar">
+    <!-- Responsive Wrapping Grid (same columns/behavior as products) -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
       @for (prod of pinnedProducts(); track prod.id) {
         <button 
           type="button"
           (click)="onProductClick(prod)"
-          class="shrink-0 flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 border border-amber-500/40 shadow-sm transition-all cursor-pointer">
-          <span class="text-xs font-bold text-white whitespace-nowrap">{{ prod.name }}</span>
-          <span class="text-[11px] font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20 whitespace-nowrap">
-            €{{ prod.price.toFixed(2) }}
+          class="bg-slate-800 hover:bg-slate-700 active:scale-95 border border-amber-500/40 rounded-xl p-2.5 flex flex-col justify-between items-start text-left shadow-sm transition-all group cursor-pointer">
+          
+          <span class="text-xs font-bold text-white group-hover:text-amber-400 transition-colors line-clamp-1">
+            {{ prod.name }}
           </span>
+
+          <div class="w-full flex justify-between items-center mt-1.5">
+            <span class="text-[10px] text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded">
+              ⭐ Top
+            </span>
+            <span class="text-xs font-black text-emerald-400">
+              €{{ prod.price.toFixed(2) }}
+            </span>
+          </div>
         </button>
       }
     </div>
