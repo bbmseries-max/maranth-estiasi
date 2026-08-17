@@ -823,8 +823,8 @@ public moveOrMergeTable(sourceTableId: string, targetTableId: string): { success
     return { success: false, message: 'Το αρχικό τραπέζι δεν έχει ενεργά προϊόντα.' };
   }
 
-  this.tables.update(list =>
-    list.map(tbl => {
+  this.tables.update((list: Table[]) =>
+    list.map((tbl: Table): Table => {
       // Clear source table
       if (tbl.id === sourceTableId) {
         return {
@@ -832,8 +832,8 @@ public moveOrMergeTable(sourceTableId: string, targetTableId: string): { success
           status: 'FREE',
           currentTotal: 0,
           activeOrder: undefined,
-          waiterName: undefined
-        };
+          assignedWaiterName: undefined
+        } as Table;
       }
 
       // Merge into target table
@@ -845,37 +845,42 @@ public moveOrMergeTable(sourceTableId: string, targetTableId: string): { success
         const grandTotal = mergedItems.reduce((acc, i) => i.status !== 'VOIDED' ? acc + (i.finalItemPrice * i.quantity) : acc, 0);
         const totalTax = grandTotal - subtotalNet;
 
+        const baseActiveOrder = tbl.activeOrder || source.activeOrder!;
+
+        const updatedOrder = {
+          ...baseActiveOrder,
+          orderId: baseActiveOrder.orderId || (baseActiveOrder as any).id || `ord_${Date.now()}`,
+          openedAt: baseActiveOrder.openedAt || new Date().toISOString(),
+          tableId: targetTableId,
+          tableNumber: tbl.number ?? tbl.tableNumber ?? '',
+          items: mergedItems,
+          subtotalNet,
+          totalTax,
+          grandTotal,
+          status: 'OPEN'
+        };
+
         return {
           ...tbl,
           status: 'OCCUPIED',
           currentTotal: grandTotal,
-          activeOrder: {
-            id: tbl.activeOrder?.id || source.activeOrder!.id,
-            tableId: targetTableId,
-            tableNumber: tbl.number,
-            items: mergedItems,
-            subtotalNet,
-            totalTax,
-            grandTotal,
-            status: 'OPEN',
-            createdAt: tbl.activeOrder?.createdAt || source.activeOrder!.createdAt,
-            orderNotes: [tbl.activeOrder?.orderNotes, source.activeOrder?.orderNotes].filter(Boolean).join(' | ')
-          }
-        };
+          activeOrder: updatedOrder as any
+        } as Table;
       }
 
       return tbl;
     })
   );
 
-  return { success: true, message: `Επιτυχής μεταφορά στο Τραπέζι #${target.number || target.tableNumber}` };
+  return { success: true, message: `Επιτυχής μεταφορά στο Τραπέζι #${target.number ?? target.tableNumber}` };
 }
 
-// 2. SETTLE PARTIAL BILL (BY SPECIFIC ITEMS)
+// 2. SETTLE PARTIAL BILL
 public async settlePartialItems(
   tableId: string, 
   itemIdsToSettle: string[], 
-  method: 'CASH' | 'CARD'
+  method: 'CASH' | 'CARD',
+  currentEmp: any = null
 ): Promise<{ success: boolean; remainingTotal: number }> {
   const table = this.tables().find(t => t.id === tableId);
   if (!table || !table.activeOrder) return { success: false, remainingTotal: 0 };
@@ -883,29 +888,30 @@ public async settlePartialItems(
   const allItems = table.activeOrder.items || [];
   const remainingItems = allItems.filter(i => !itemIdsToSettle.includes(i.id));
 
-  // If all items were paid, close the table
+  // If all items were paid, execute full settlement
   if (remainingItems.length === 0 || remainingItems.every(i => i.status === 'VOIDED')) {
-    await this.settleTablePayment(tableId, method);
+    await this.settleTablePayment(tableId, method, currentEmp, undefined as any);
     return { success: true, remainingTotal: 0 };
   }
 
-  // Otherwise, calculate remaining balance and keep table occupied
   const subtotalNet = remainingItems.reduce((acc, i) => i.status !== 'VOIDED' ? acc + (i.unitPrice * i.quantity) : acc, 0);
   const grandTotal = remainingItems.reduce((acc, i) => i.status !== 'VOIDED' ? acc + (i.finalItemPrice * i.quantity) : acc, 0);
   const totalTax = grandTotal - subtotalNet;
 
-  this.tables.update(list =>
-    list.map(tbl => tbl.id === tableId ? {
-      ...tbl,
-      currentTotal: grandTotal,
-      activeOrder: {
-        ...tbl.activeOrder!,
-        items: remainingItems,
-        subtotalNet,
-        totalTax,
-        grandTotal
-      }
-    } : tbl)
+  this.tables.update((list: Table[]) =>
+    list.map((tbl: Table): Table => 
+      tbl.id === tableId ? ({
+        ...tbl,
+        currentTotal: grandTotal,
+        activeOrder: {
+          ...tbl.activeOrder!,
+          items: remainingItems,
+          subtotalNet,
+          totalTax,
+          grandTotal
+        } as any
+      } as Table) : tbl
+    )
   );
 
   return { success: true, remainingTotal: grandTotal };
