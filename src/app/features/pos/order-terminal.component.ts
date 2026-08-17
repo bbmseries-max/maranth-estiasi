@@ -113,7 +113,6 @@ export class OrderTerminalComponent implements OnInit {
     }
   }
 
-// --- DEFAULT COFFEE MODIFIERS FALLBACK ---
   private defaultCoffeeModifiers: ModifierGroup[] = [
     {
       id: 'grp_sweetness',
@@ -153,40 +152,90 @@ export class OrderTerminalComponent implements OnInit {
     }
   ];
 
-  public activeModifierGroups = computed<ModifierGroup[]>(() => {
+  // --- 🥪 DEFAULT FOOD / TOAST / SANDWICH MODIFIERS ---
+  private defaultFoodModifiers: ModifierGroup[] = [
+    {
+      id: 'grp_bread',
+      name: 'Είδος Ψωμιού',
+      required: true,
+      minSelections: 1,
+      maxSelections: 1,
+      options: [
+        { id: 'opt_toast_white', name: 'Λευκό Ψωμί', priceExtra: 0 },
+        { id: 'opt_toast_dark', name: 'Ψωμί Ολικής', priceExtra: 0 },
+        { id: 'opt_brioche', name: 'Brioche / Τσιαπάτα', priceExtra: 0.50 }
+      ]
+    },
+    {
+      id: 'grp_baking',
+      name: 'Ψήσιμο',
+      required: false,
+      minSelections: 0,
+      maxSelections: 1,
+      options: [
+        { id: 'opt_bake_normal', name: 'Κανονικό', priceExtra: 0 },
+        { id: 'opt_bake_welldone', name: 'Καλοψημένο / Τραγανό', priceExtra: 0 }
+      ]
+    },
+    {
+      id: 'grp_food_extras',
+      name: 'Extra Προσθήκες',
+      required: false,
+      minSelections: 0,
+      maxSelections: 4,
+      options: [
+        { id: 'opt_extra_bacon', name: 'Extra Μπέικον', priceExtra: 0.60 },
+        { id: 'opt_extra_cheese', name: 'Extra Τυρί', priceExtra: 0.50 },
+        { id: 'opt_extra_mayo', name: 'Μαγιονέζα / Sauce', priceExtra: 0.40 },
+        { id: 'opt_extra_egg', name: 'Αυγό', priceExtra: 0.70 }
+      ]
+    }
+  ];
+
+// --- DEFAULT COFFEE MODIFIERS FALLBACK ---
+private isFoodItemWithModifiers(product: Product): boolean {
+    const text = `${product.name} ${product.categoryName || ''}`.toLowerCase();
+    return /τοστ|tost|toast|σάντουιτς|sandwich|burger|club|κλαμπ|μπαγκέτα|baguette|hot dog|ομελέτα/i.test(text);
+  }
+
+  // Helper to detect coffee/drink items
+  private isCoffeeItem(product: Product): boolean {
+    const text = `${product.name} ${product.categoryName || ''}`.toLowerCase();
+    return /espresso|freddo|cappuccino|latte|nescafe|frappe|ελληνικ|καφέ|coffee|τσάι|tea/i.test(text);
+  }
+
+public activeModifierGroups = computed<ModifierGroup[]>(() => {
     const prod = this.selectedProductForModifiers();
     if (!prod) return [];
 
-    const allGroups: ModifierGroup[] = this.posService.inventoryService.modifierGroups() || [];
+    const allGroups: ModifierGroup[] = this.posService.inventoryService?.modifierGroups?.() || [];
     const matched = allGroups.filter((g: ModifierGroup) => prod.modifierGroupIds?.includes(g.id));
 
-    // Check if item is coffee
-    const isCoffeeItem = 
-      prod.categoryName?.toLowerCase().includes('καφέ') || 
-      prod.categoryName?.toLowerCase().includes('coffee') ||
-      /espresso|freddo|cappuccino|latte|nescafe|frappe|ελληνικ/i.test(prod.name);
+    if (matched.length > 0) return matched;
 
-    if (matched.length === 0 && isCoffeeItem) {
+    // Smart Fallbacks if no explicit IDs linked
+    if (this.isFoodItemWithModifiers(prod)) {
+      return this.defaultFoodModifiers;
+    }
+
+    if (this.isCoffeeItem(prod)) {
       return this.defaultCoffeeModifiers;
     }
 
-    return matched;
+    return [];
   });
-
-  // --- PRODUCT & MODIFIER ACTIONS ---
 
   public onProductClick(product: Product): void {
     const tableId = this.activeTableId();
     if (!tableId) return;
 
-    const isCoffeeItem = 
-      product.categoryName?.toLowerCase().includes('καφέ') || 
-      product.categoryName?.toLowerCase().includes('coffee') ||
-      /espresso|freddo|cappuccino|latte|nescafe|frappe|ελληνικ/i.test(product.name);
+    const hasExplicitModifiers = product.modifierGroupIds && product.modifierGroupIds.length > 0;
+    const needsFallback = this.isCoffeeItem(product) || this.isFoodItemWithModifiers(product);
 
-    if ((product.modifierGroupIds && product.modifierGroupIds.length > 0) || isCoffeeItem) {
+    if (hasExplicitModifiers || needsFallback) {
       this.openModifierModal(product);
     } else {
+      // Direct 1-tap addition for simple items (water, beers, sodas, etc.)
       this.posService.addProductToTableOrder(tableId, product);
     }
   }
