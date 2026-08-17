@@ -433,18 +433,18 @@ export class OrderTerminalComponent implements OnInit {
     const targetId = this.selectedTargetTableId();
     if (!sourceId || !targetId) return;
 
-    const res = await this.posService.moveOrMergeTable(
-      sourceId, 
-      targetId
-    );
-
+    // 1. Close modal immediately to prevent UI locking
     this.showTransferModal.set(false);
 
+    // 2. Perform the Firestore transfer
+    const res = await this.posService.moveOrMergeTable(sourceId, targetId);
+
     if (res.success) {
-      // 1. Explicitly switch active table signal first
+      // 3. Update the active table signal directly in place
       this.activeTableId.set(targetId);
-      // 2. Navigate cleanly with replaceUrl to avoid route state stacking
-      this.router.navigate(['/order-terminal', targetId], { replaceUrl: true });
+      
+      // 4. Update the URL without destroying/recreating the component instance
+      window.history.replaceState({}, '', `/order-terminal/${targetId}`);
     } else {
       alert(res.message);
     }
