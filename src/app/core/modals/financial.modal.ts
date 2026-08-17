@@ -31,7 +31,7 @@ export interface AuditLog {
   employeeId: string;
   employeeName: string;
   action: string;
-  tableNumber?: number;
+  tableNumber?: string | number;
   details: string;
 }
 

@@ -74,6 +74,7 @@ export class RestaurantPosService {
   private activeVaultsUnsub: Unsubscribe | null = null;
   private salesUnsub: Unsubscribe | null = null;
   private zReportsUnsub: Unsubscribe | null = null;
+  private auditLogsUnsub: Unsubscribe | null = null;
   private isInitialized = false;
 
   // Sub-Services Injection
@@ -368,19 +369,18 @@ export class RestaurantPosService {
   }
 
   // 1. Computed list of pinned items
-public pinnedProducts = computed(() => 
-  this.products().filter(p => p.isPinnedToPOS === true)
-);
-
-// 2. 1-tap Toggle method for Admin/Manager
-public toggleProductPinned(productId: string): void {
-  this.products.update(list =>
-    list.map(prod => 
-      prod.id === productId ? { ...prod, isPinnedToPOS: !prod.isPinnedToPOS } : prod
-    )
+  public pinnedProducts = computed(() => 
+    this.products().filter(p => p.isPinnedToPOS === true)
   );
-  // Persist to local storage or Firestore if applicable
-}
+
+  // 2. 1-tap Toggle method for Admin/Manager
+  public toggleProductPinned(productId: string): void {
+    this.products.update(list =>
+      list.map(prod => 
+        prod.id === productId ? { ...prod, isPinnedToPOS: !prod.isPinnedToPOS } : prod
+      )
+    );
+  }
 
   // --- AUTH & STAFF DELEGATES ---
   public async loginWithPin(pin: string): Promise<Employee | null> {
@@ -426,17 +426,14 @@ public toggleProductPinned(productId: string): void {
   }
 
   public logoutEmployee(): void {
-    // 1. Clear in-memory signals
     this.authShiftService.currentEmployee.set(null);
     this.authShiftService.activeWorkShift.set(null);
     this.activeVaultSession.set(null);
     
-    // 2. Clear all storage keys
     localStorage.removeItem('current_employee');
     localStorage.removeItem('maranth_pos_employee');
     sessionStorage.removeItem('current_employee');
 
-    // 3. Navigate to login
     this.router.navigate(['/login'], { replaceUrl: true });
   }
 
@@ -506,6 +503,7 @@ public toggleProductPinned(productId: string): void {
 
     if (this.salesUnsub) this.salesUnsub();
     if (this.zReportsUnsub) this.zReportsUnsub();
+    if (this.auditLogsUnsub) this.auditLogsUnsub();
 
     const targetTenant = normalizeKey(this.activeTenantId());
     const targetStore = normalizeKey(this.activeStoreId());
@@ -547,6 +545,25 @@ public toggleProductPinned(productId: string): void {
       list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       this.zReports.set(list);
     }, (err) => console.warn('Z-Reports listener:', err));
+
+    // 3. Sync Audit Logs
+    this.auditLogsUnsub = onSnapshot(collection(this.db, 'auditLogs'), (snap) => {
+      const list: AuditLog[] = [];
+      snap.forEach(d => {
+        const data = d.data() as AuditLog;
+        const dTenant = normalizeKey(data.tenantId);
+        const dStore = normalizeKey(data.storeId);
+
+        const matchTenant = !dTenant || dTenant === targetTenant;
+        const matchStore = !dStore || dStore === targetStore || dStore === 'all';
+
+        if (matchTenant && matchStore) {
+          list.push({ ...data, id: d.id });
+        }
+      });
+      list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      this.auditLogs.set(list);
+    }, (err) => console.warn('Audit logs listener:', err));
   }
 
   public addRawMaterial(data: { name: string; unit: UnitOfMeasure; currentStock: number; minAlertStock: number; costPerUnit: number }) {
@@ -791,7 +808,7 @@ public toggleProductPinned(productId: string): void {
         const myActiveVault = activeOnly.find(v => 
           v.waiterId === empId || 
           v.waiterId === cleanPin || 
-          v.waiterName?.toLowerCase() === empName ||
+          v.waiterName?.toLowerCase() === empName || 
           (v.waiterId && cleanPin && v.waiterId.includes(cleanPin))
         );
         this.activeVaultSession.set(myActiveVault || null);
@@ -962,7 +979,7 @@ public toggleProductPinned(productId: string): void {
     );
 
     this.logAudit(
-      'VAULT_CLOSED',
+      'VAULT_CLOSED', 
       `Κλείσιμο ταμείου (${closedSession.waiterName}): Μετρητά €${cash.toFixed(2)}, Κάρτες €${card.toFixed(2)}. Παράδοση: €${handedOver.toFixed(2)}`
     );
 
@@ -1048,9 +1065,21 @@ public toggleProductPinned(productId: string): void {
   }
 
   // --- AUDIT LOGGING ---
-  public logAudit(action: string, details: string, tableNumber?: number): void {
+  public logAudit(action: string, details: string, tableContext?: string | number | any): void {
     const emp = this.currentEmployee();
     const { tenantId, storeId } = this.getActiveTenantAndStore();
+
+    // 🔒 Safely resolve table identifier (handles "A1", 5, Table object, or undefined)
+    let resolvedTableNumber: string | number | undefined = undefined;
+    if (typeof tableContext === 'string' || typeof tableContext === 'number') {
+      resolvedTableNumber = tableContext;
+    } else if (tableContext && typeof tableContext === 'object') {
+      resolvedTableNumber = 
+        tableContext.tableNumber ?? 
+        tableContext.number ?? 
+        tableContext.activeOrder?.tableNumber ?? 
+        tableContext.id;
+    }
 
     const newLog: AuditLog = {
       id: `AUDIT-${Date.now()}`,
@@ -1060,21 +1089,22 @@ public toggleProductPinned(productId: string): void {
       employeeId: emp?.id || 'SYSTEM',
       employeeName: emp?.name || 'Σύστημα',
       action,
-      tableNumber,
+      tableNumber: resolvedTableNumber,
       details
     };
+
     this.auditLogs.set([newLog, ...this.auditLogs()]);
     if (this.db) {
       setDoc(doc(this.db, 'auditLogs', newLog.id), cleanUndefined(newLog)).catch(() => {});
     }
   }
 
-  // Inside RestaurantPosService (simple 1-line delegations)
-public moveOrMergeTable(sourceTableId: string, targetTableId: string) {
-  return this.tableOrderService.moveOrMergeTable(sourceTableId, targetTableId);
-}
+  // --- TABLE TRANSFER & PARTIAL SETTLEMENT DELEGATES ---
+  public moveOrMergeTable(sourceTableId: string, targetTableId: string) {
+    return this.tableOrderService.moveOrMergeTable(sourceTableId, targetTableId);
+  }
 
-public settlePartialItems(tableId: string, itemIdsToSettle: string[], method: 'CASH' | 'CARD') {
-  return this.tableOrderService.settlePartialItems(tableId, itemIdsToSettle, method);
-}
+  public settlePartialItems(tableId: string, itemIdsToSettle: string[], method: 'CASH' | 'CARD') {
+    return this.tableOrderService.settlePartialItems(tableId, itemIdsToSettle, method, this.currentEmployee());
+  }
 }

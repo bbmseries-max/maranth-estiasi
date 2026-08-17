@@ -494,9 +494,9 @@
                       {{ log.action }}
                     </span>
                   </td>
-                  <td class="py-3 px-3 font-bold text-amber-400">
-                    {{ log.tableNumber ? '#' + log.tableNumber : '-' }}
-                  </td>
+                 <td class="py-3 px-3 font-bold text-amber-400">
+  {{ log.tableNumber ? '#' + log.tableNumber : '-' }}
+</td>
                   <td class="py-3 px-3 text-slate-300 font-medium">{{ log.details }}</td>
                 </tr>
               } @empty {
