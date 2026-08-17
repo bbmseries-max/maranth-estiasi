@@ -7,6 +7,8 @@ import {
   getFirestore, 
   collection, 
   doc, 
+  orderBy,
+  limit,
   setDoc, 
   getDocs, 
   deleteDoc, 
@@ -547,23 +549,56 @@ export class RestaurantPosService {
     }, (err) => console.warn('Z-Reports listener:', err));
 
     // 3. Sync Audit Logs
-    this.auditLogsUnsub = onSnapshot(collection(this.db, 'auditLogs'), (snap) => {
-      const list: AuditLog[] = [];
-      snap.forEach(d => {
-        const data = d.data() as AuditLog;
-        const dTenant = normalizeKey(data.tenantId);
-        const dStore = normalizeKey(data.storeId);
+    // 3. Sync Audit Logs (Limited to 100 most recent)
+    const auditQuery = query(
+      collection(this.db, 'auditLogs'),
+      where('tenantId', '==', targetTenant),
+      orderBy('timestamp', 'desc'),
+      limit(100)
+    );
 
-        const matchTenant = !dTenant || dTenant === targetTenant;
-        const matchStore = !dStore || dStore === targetStore || dStore === 'all';
+    this.auditLogsUnsub = onSnapshot(
+      auditQuery,
+      (snap) => {
+        const list: AuditLog[] = [];
+        snap.forEach(d => {
+          const data = d.data() as AuditLog;
+          const dStore = normalizeKey(data.storeId);
+          const matchStore = !dStore || dStore === targetStore || dStore === 'all';
 
-        if (matchTenant && matchStore) {
-          list.push({ ...data, id: d.id });
-        }
-      });
-      list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      this.auditLogs.set(list);
-    }, (err) => console.warn('Audit logs listener:', err));
+          if (matchStore) {
+            list.push({ ...data, id: d.id });
+          }
+        });
+        
+        list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        this.auditLogs.set(list.slice(0, 100));
+      },
+      (err) => {
+        // Fallback in case Firestore composite index on (tenantId + timestamp) is pending creation
+        console.warn('Audit logs compound query warning, falling back to base collection:', err);
+        
+        const fallbackQuery = query(collection(this.db, 'auditLogs'), limit(100));
+        this.auditLogsUnsub = onSnapshot(fallbackQuery, (fallbackSnap) => {
+          const fallbackList: AuditLog[] = [];
+          fallbackSnap.forEach(d => {
+            const data = d.data() as AuditLog;
+            const dTenant = normalizeKey(data.tenantId);
+            const dStore = normalizeKey(data.storeId);
+
+            const matchTenant = !dTenant || dTenant === targetTenant;
+            const matchStore = !dStore || dStore === targetStore || dStore === 'all';
+
+            if (matchTenant && matchStore) {
+              fallbackList.push({ ...data, id: d.id });
+            }
+          });
+
+          fallbackList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          this.auditLogs.set(fallbackList.slice(0, 100));
+        });
+      }
+    );
   }
 
   public addRawMaterial(data: { name: string; unit: UnitOfMeasure; currentStock: number; minAlertStock: number; costPerUnit: number }) {
