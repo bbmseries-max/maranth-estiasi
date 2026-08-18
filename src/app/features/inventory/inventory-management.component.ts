@@ -233,28 +233,38 @@ export class InventoryManagementComponent {
     this.showTableModal.set(true);
   }
 
- public saveTableDetails(): void {
+public saveTableDetails(): void {
   const targetId = this.editingTableId();
-  // Map Greek UI zones to English sections if needed
-  const section = this.tableZoneInput === 'Αυλή' ? 'OUTDOOR' : this.tableZoneInput === 'Bar' ? 'BAR' : this.tableZoneInput === 'VIP' ? 'VIP' : 'INDOOR';
+  
+  // 1. Convert inputs from string to numbers
+  const parsedNumber = parseInt(String(this.tableNumberInput).trim(), 10);
+  const parsedSeats = parseInt(String(this.tableSeatsInput).trim(), 10) || 4;
+
+  // 2. Validate client-side
+  if (isNaN(parsedNumber) || parsedNumber <= 0) {
+    this.tableErrorMessage.set('Ο αριθμός τραπεζιού πρέπει να είναι θετικός ακέραιος (1, 2, 3...).');
+    return;
+  }
+
+  // 3. Map Greek UI zones with explicit union typing 👈
+  const section: 'OUTDOOR' | 'BAR' | 'VIP' | 'INDOOR' = 
+    this.tableZoneInput === 'Αυλή' ? 'OUTDOOR' : 
+    this.tableZoneInput === 'Bar' ? 'BAR' : 
+    this.tableZoneInput === 'VIP' ? 'VIP' : 'INDOOR';
+
+  // 4. Payload matches Partial<Table>
+  const tableData = {
+    number: parsedNumber,
+    seats: parsedSeats,
+    zone: this.tableZoneInput,
+    section: section
+  };
 
   if (targetId) {
-    // 👈 Removed 'capacity' and 'tableNumber'
-    this.posService.updateTable(targetId, {
-      number: this.tableNumberInput,
-      seats: this.tableSeatsInput,
-      zone: this.tableZoneInput,
-      section: section
-    });
+    this.posService.updateTable(targetId, tableData);
     this.showTableModal.set(false);
   } else {
-    // 👈 Removed 'capacity'
-    const result = this.posService.addTable({
-      number: this.tableNumberInput,
-      seats: this.tableSeatsInput,
-      zone: this.tableZoneInput,
-      section: section
-    });
+    const result = this.posService.addTable(tableData);
 
     if (result.success) {
       this.showTableModal.set(false);
