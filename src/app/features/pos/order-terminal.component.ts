@@ -211,25 +211,45 @@ export class OrderTerminalComponent implements OnInit {
     }
   ];
 
-  private isFoodItemWithModifiers(product: Product): boolean {
-    const cat = this.categories().find(c => c.id === product.categoryId);
-    const text = `${product.name} ${product.categoryName || ''} ${cat?.name || ''}`.toLowerCase();
-    return /τοστ|tost|toast|σάντουιτς|sandwich|burger|club|κλαμπ|μπαγκέτ|baguette|hot dog|ομελέτ|omelet|φαγητ|food|σνακ|snack|κρέπ|crepe|κρουασάν|croissant|σαλάτ|salad|πίτσ|pizza|τορτίγ|tortilla|wrap|brunch/i.test(text);
+ // --- SIMPLE / STANDALONE ITEMS EXCLUSION ---
+  private isSimpleStandaloneProduct(product: Product): boolean {
+    const name = (product.name || '').toLowerCase();
+    // Items that must NEVER have automatic default modifiers:
+    return /νερό|nero|water|sparkling|ανθρακούχο|soda|σόδα|cola|fanta|sprite|redbull|χυμό|juice|μπύρα|beer|κρασί|wine|ποτό|drink|vodka|gin|rum|whiskey|κρουασάν|croissant|κέικ|cake|cookie|κουλούρι|μπουγάτσα|τυρόπιτα/i.test(name);
   }
 
+  // --- REFINED FOOD MODIFIERS DETECTOR ---
+  private isFoodItemWithModifiers(product: Product): boolean {
+    if (this.isSimpleStandaloneProduct(product)) return false;
+
+    // Focus only on customizable food items (Sandwiches, Toasts, Burgers, Club, Crepes, Omelettes)
+    const name = (product.name || '').toLowerCase();
+    return /τοστ|tost|toast|σάντουιτς|sandwich|burger|club|κλαμπ|μπαγκέτ|baguette|hot dog|ομελέτ|omelet|κρέπ|crepe|τορτίγ|tortilla|wrap/i.test(name);
+  }
+
+  // --- REFINED COFFEE / TEA DETECTOR ---
   private isCoffeeItem(product: Product): boolean {
-    const cat = this.categories().find(c => c.id === product.categoryId);
-    const text = `${product.name} ${product.categoryName || ''} ${cat?.name || ''}`.toLowerCase();
-    return /espresso|freddo|cappuccino|latte|nescafe|frappe|ελληνικ|καφέ|coffee|τσάι|tea/i.test(text);
+    if (this.isSimpleStandaloneProduct(product)) return false;
+
+    // Check specifically on the product name so broad category names don't trigger on waters/sodas
+    const name = (product.name || '').toLowerCase();
+    return /espresso|freddo|cappuccino|latte|nescafe|frappe|ελληνικ|φίλτρου|filter|καφέ|coffee|τσάι|tea|σοκολάτα|chocolate/i.test(name);
   }
 
   public getModifierGroupsForProduct(product: Product): ModifierGroup[] {
+    // 1. Explicit modifiers assigned directly to the product
     const allGroups: ModifierGroup[] = this.posService.inventoryService?.modifierGroups?.() || [];
     const matched = allGroups.filter((g: ModifierGroup) => product.modifierGroupIds?.includes(g.id));
 
     if (matched.length > 0) return matched;
+
+    // 2. Never attach default modifiers to simple/packaged items
+    if (this.isSimpleStandaloneProduct(product)) return [];
+
+    // 3. Fallback to customizable smart defaults
     if (this.isFoodItemWithModifiers(product)) return this.defaultFoodModifiers;
     if (this.isCoffeeItem(product)) return this.defaultCoffeeModifiers;
+
     return [];
   }
 
