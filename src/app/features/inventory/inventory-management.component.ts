@@ -236,25 +236,25 @@ export class InventoryManagementComponent {
 public saveTableDetails(): void {
   const targetId = this.editingTableId();
   
-  // 1. Convert inputs from string to numbers
-  const parsedNumber = parseInt(String(this.tableNumberInput).trim(), 10);
+  // 1. Keep table number/code as a trimmed string (e.g., "A1", "B2", "1")
+  const tableNameOrCode = String(this.tableNumberInput || '').trim();
   const parsedSeats = parseInt(String(this.tableSeatsInput).trim(), 10) || 4;
 
-  // 2. Validate client-side
-  if (isNaN(parsedNumber) || parsedNumber <= 0) {
-    this.tableErrorMessage.set('Ο αριθμός τραπεζιού πρέπει να είναι θετικός ακέραιος (1, 2, 3...).');
+  // 2. Validate that the name/code is not empty
+  if (!tableNameOrCode) {
+    this.tableErrorMessage.set('Παρακαλώ εισάγετε όνομα ή κωδικό τραπεζιού (π.χ. 1, A1, B2).');
     return;
   }
 
-  // 3. Map Greek UI zones with explicit union typing 👈
+  // 3. Map Greek UI zones with explicit union typing
   const section: 'OUTDOOR' | 'BAR' | 'VIP' | 'INDOOR' = 
     this.tableZoneInput === 'Αυλή' ? 'OUTDOOR' : 
     this.tableZoneInput === 'Bar' ? 'BAR' : 
     this.tableZoneInput === 'VIP' ? 'VIP' : 'INDOOR';
 
-  // 4. Payload matches Partial<Table>
+  // 4. Payload accepts string or number
   const tableData = {
-    number: parsedNumber,
+    number: tableNameOrCode,
     seats: parsedSeats,
     zone: this.tableZoneInput,
     section: section
