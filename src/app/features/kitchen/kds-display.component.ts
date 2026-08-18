@@ -32,42 +32,21 @@ export interface VoidNotificationItem {
   imports: [CommonModule],
   template: `
     <div class="min-h-screen bg-slate-950 p-4 text-slate-100 font-sans select-none relative">
-      
 
-    <!-- FLOATING VOID NOTIFICATION BANNERS -->
-@if (voidNotifications().length > 0) {
-  <div class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-auto">
-    @for (alert of voidNotifications(); track alert.id) {
-      <div class="p-4 rounded-2xl bg-rose-950/95 border-2 border-rose-500 text-white shadow-2xl flex items-center justify-between gap-3 animate-bounce">
-        <div class="flex items-center gap-3">
-          <span class="text-2xl">🚨</span>
-          <div>
-            <span class="font-black text-xs text-rose-300 block">ΑΚΥΡΩΣΗ - Τραπέζι #{{ alert.tableNumber }}</span>
-            <span class="font-bold text-sm block">{{ alert.itemName }}</span>
-            <span class="text-[11px] text-slate-300">{{ alert.reason }}</span>
-          </div>
-        </div>
-        <button (click)="dismissVoidNotification(alert.id)" class="text-slate-400 hover:text-white text-lg p-1">✕</button>
-      </div>
-    }
-  </div>
-}
-      <!-- VOID ALERTS OVERLAY -->
-      @if (activeVoidAlerts().length > 0) {
-        <div class="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-full max-w-lg px-4">
-          @for (alert of activeVoidAlerts(); track alert.id) {
-            <div class="bg-red-600 text-white p-4 rounded-2xl shadow-2xl border-2 border-red-400 animate-pulse flex items-center justify-between">
+      <!-- FLOATING VOID NOTIFICATION BANNERS -->
+      @if (voidNotifications().length > 0) {
+        <div class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-auto">
+          @for (alert of voidNotifications(); track alert.id) {
+            <div class="p-4 rounded-2xl bg-rose-950/95 border-2 border-rose-500 text-white shadow-2xl flex items-center justify-between gap-3 animate-bounce">
               <div class="flex items-center gap-3">
-                <span class="text-2xl">🚫</span>
+                <span class="text-2xl">🚨</span>
                 <div>
-                  <h4 class="font-black text-sm uppercase m-0">ΑΚΥΡΩΣΗ - Τραπέζι #{{ alert.tableNumber }}</h4>
-                  <p class="text-xs font-bold text-red-100 m-0">{{ alert.itemName }} {{ alert.reason ? '(' + alert.reason + ')' : '' }}</p>
+                  <span class="font-black text-xs text-rose-300 block">ΑΚΥΡΩΣΗ - Τραπέζι #{{ alert.tableNumber }}</span>
+                  <span class="font-bold text-sm block">{{ alert.itemName }}</span>
+                  <span class="text-[11px] text-slate-300">{{ alert.reason }}</span>
                 </div>
               </div>
-              <button (click)="acknowledgeVoid(alert.id)" 
-                      class="px-3 py-1.5 bg-white text-red-700 font-black text-xs rounded-xl hover:bg-red-50 transition-all cursor-pointer">
-                OK / Ελήφθη
-              </button>
+              <button (click)="dismissVoidNotification(alert.id)" class="text-slate-400 hover:text-white text-lg p-1 cursor-pointer">✕</button>
             </div>
           }
         </div>
@@ -160,14 +139,14 @@ export interface VoidNotificationItem {
 
                     <!-- MODIFIERS -->
                     @if (item.modifiers && item.modifiers.length > 0) {
-  <div class="flex flex-wrap gap-1.5 pl-9">
-    @for (mod of item.modifiers; track mod.id || mod.optionId || $index) {
-      <span class="text-xs font-extrabold bg-amber-400/10 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-md">
-        + {{ mod.name || mod.optionName || 'Επιλογή' }}
-      </span>
-    }
-  </div>
-}
+                      <div class="flex flex-wrap gap-1.5 pl-9">
+                        @for (mod of item.modifiers; track mod.id || mod.optionId || $index) {
+                          <span class="text-xs font-extrabold bg-amber-400/10 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-md">
+                            + {{ mod.name || mod.optionName || 'Επιλογή' }}
+                          </span>
+                        }
+                      </div>
+                    }
 
                     <!-- ITEM SPECIFIC NOTE -->
                     @if (item.itemNotes) {
@@ -198,16 +177,15 @@ export interface VoidNotificationItem {
   `
 })
 export class KdsDisplayComponent implements OnInit, OnDestroy {
-  // 🔔 1. Declare the signal to store active void alerts
   public voidNotifications = signal<VoidNotificationItem[]>([]);
   public posService = inject(RestaurantPosService);
   public stationFilter = signal<'ALL' | 'BAR' | 'KITCHEN'>('ALL');
   public now = signal<number>(Date.now());
-  public activeVoidAlerts = signal<Array<{ id: string; tableNumber: number; itemName: string; reason?: string }>>([]);
 
   private timerInterval: any;
   private knownItemStateMap = new Map<string, ItemPreparationStatus>();
   private isInitialLoad = true;
+  private audioCtx: AudioContext | null = null;
 
   // Active tickets that have actually been SENT to the kitchen/bar (SENT_TO_KITCHEN or PREPARING)
   public activeTickets = computed<KitchenTicket[]>(() => {
@@ -216,14 +194,13 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
 
     for (const table of tables) {
       if (table.activeOrder && table.activeOrder.items && table.activeOrder.items.length > 0) {
-        // Only show items that have been officially sent (ignore unsent PENDING and finished SERVED/VOIDED)
         const pendingItems = table.activeOrder.items.filter(
           i => i.status === 'SENT_TO_KITCHEN' || i.status === 'PREPARING'
         );
         
         if (pendingItems.length > 0) {
           tickets.push({
-            tableNumber: table.tableNumber || table.number || 0,
+            tableNumber: table.tableNumber ?? table.number ?? '1',
             zone: table.zone || table.section || 'Σάλα',
             tableId: table.id,
             orderId: table.activeOrder.orderId,
@@ -240,35 +217,54 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
     return tickets;
   });
 
-  // Determines whether an item belongs to the BAR or KITCHEN
-  private isBarItem(item: TableOrderItem): boolean {
-    const products = this.posService.products();
-    const prod = products.find(p => p.id === item.productId);
-    
-    const catId = (prod?.categoryId || '').toUpperCase();
-    const catName = (prod?.categoryName || '').toLowerCase();
+// Helper to strip Greek tones/accents and lowercase
+private normalizeText(str?: string | null): string {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Strips accents: 'ποτά' -> 'ποτα'
+    .trim();
+}
 
-    // 1. Explicit Category ID / Name Match
-    if (catId.includes('COFFEE') || catId.includes('DRINK') || catId.includes('BAR') || catId.includes('BEVERAGE')) {
-      return true;
-    }
-    if (catName.includes('καφέ') || catName.includes('coffee') || catName.includes('ροφήμα') || catName.includes('ποτό') || catName.includes('bar')) {
-      return true;
-    }
+private isBarItem(item: TableOrderItem): boolean {
+  // 1. Check if the product or category explicitly has a preparation station tag
+  const products = this.posService.products();
+  const prod = products.find(p => p.id === item.productId);
 
-    // 2. Keyword Match on Product Name
-    const name = (item.productName || prod?.name || '').toLowerCase();
-    return (
-      name.includes('καφέ') || name.includes('espresso') || name.includes('freddo') || 
-      name.includes('cappuccino') || name.includes('latte') || name.includes('nescafe') || 
-      name.includes('frappe') || name.includes('ελληνικ') || name.includes('τσάι') || 
-      name.includes('νερό') || name.includes('ποτό') || name.includes('μπύρα') || 
-      name.includes('χυμό') || name.includes('drink') || name.includes('coffee') || 
-      name.includes('cocktail') || name.includes('αναψυκτικ') || name.includes('σοκολάτα') || 
-      name.includes('soda') || name.includes('beer') || name.includes('cola') || 
-      name.includes('sprite') || name.includes('fanta') || name.includes('aperol')
-    );
+  if ((prod as any)?.station === 'BAR' || (prod as any)?.targetStation === 'BAR') {
+    return true;
   }
+  if ((prod as any)?.station === 'KITCHEN' || (prod as any)?.targetStation === 'KITCHEN') {
+    return false;
+  }
+
+  // 2. Normalized category check
+  const catId = this.normalizeText(prod?.categoryId);
+  const catName = this.normalizeText(prod?.categoryName);
+
+  const barCategories = [
+    'coffee', 'kafe', 'drink', 'bar', 'beverage', 'pota', 'poto', 
+    'rofima', 'cocktail', 'krasia', 'mpyra', 'mpira', 'cava', 'kava'
+  ];
+
+  if (barCategories.some(c => catId.includes(c) || catName.includes(c))) {
+    return true;
+  }
+
+  // 3. Normalized product name check
+  const name = this.normalizeText(item.productName || prod?.name);
+
+  const barKeywords = [
+    'vodka', 'gin', 'rum', 'whiskey', 'whisky', 'tequila', 'tsipouro', 'ouzo', 'raki',
+    'shot', 'shotaki', 'b52', 'espresso', 'freddo', 'cappuccino', 'latte', 'nescafe', 
+    'frappe', 'ellinik', 'tsai', 'tea', 'nero', 'water', 'poto', 'mpira', 'beer', 
+    'krasi', 'wine', 'aperol', 'spritz', 'mojito', 'chymo', 'juice', 'soda', 'cola', 
+    'fanta', 'sprite', 'tonic', 'redbull', 'chocolate', 'sokolata'
+  ];
+
+  return barKeywords.some(kw => name.includes(kw));
+}
 
   public filteredTickets = computed<KitchenTicket[]>(() => {
     const all = this.activeTickets();
@@ -305,7 +301,7 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
             if (!this.isInitialLoad && previousStatus && previousStatus !== 'VOIDED' && item.status === 'VOIDED') {
               this.handleVoidNotification({
                 id: `VOID-${Date.now()}-${item.id}`,
-                tableNumber: table.tableNumber || table.number || 0,
+                tableNumber: table.tableNumber ?? table.number ?? '1',
                 itemName: `${item.quantity}x ${item.productName}`,
                 reason: item.itemNotes || 'Ακύρωση από σερβιτόρο'
               });
@@ -334,7 +330,6 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
       this.now.set(Date.now());
     }, 10000);
 
-    // Unlocks browser audio on first tap/click anywhere on the kitchen screen
     const unlockAudio = () => {
       this.getAudioContext();
       window.removeEventListener('click', unlockAudio);
@@ -394,22 +389,11 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
     this.posService.bumpOrderItemStatus(ticket.tableId, item.id);
   }
 
-  public completeEntireTicket(ticket: KitchenTicket): void {
-    for (const item of ticket.items) {
-      this.posService.bumpOrderItemStatus(ticket.tableId, item.id);
-    }
+public completeEntireTicket(ticket: KitchenTicket): void {
+  for (const item of ticket.items) {
+    this.posService.bumpOrderItemStatus(ticket.tableId, item.id);
   }
-
-  public acknowledgeVoid(alertId: string): void {
-    this.activeVoidAlerts.update(alerts => alerts.filter(a => a.id !== alertId));
-  }
-
-  // 🔊 Audio context reference
-  private audioCtx: AudioContext | null = null;
-
-  /**
-   * Initializes / resumes AudioContext on user interaction to bypass autoplay restrictions
-   */
+}
   private getAudioContext(): AudioContext | null {
     try {
       if (!this.audioCtx) {
@@ -425,9 +409,6 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
     }
   }
 
-  /**
-   * Generates a 2-tone kitchen warning alert (880 Hz -> 440 Hz)
-   */
   public playVoidAlertSound(): void {
     const ctx = this.getAudioContext();
     if (!ctx) return;
@@ -435,7 +416,7 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
     try {
       const now = ctx.currentTime;
 
-      // Tone 1: High Warning Beep (880 Hz - Sine wave)
+      // Tone 1: High Warning Beep (880 Hz)
       const osc1 = ctx.createOscillator();
       const gain1 = ctx.createGain();
       osc1.type = 'sine';
@@ -448,7 +429,7 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
       osc1.start(now);
       osc1.stop(now + 0.25);
 
-      // Tone 2: Drop Urgent Alert (440 Hz - Sawtooth wave)
+      // Tone 2: Drop Urgent Alert (440 Hz)
       const osc2 = ctx.createOscillator();
       const gain2 = ctx.createGain();
       osc2.type = 'sawtooth';
@@ -465,20 +446,14 @@ export class KdsDisplayComponent implements OnInit, OnDestroy {
     }
   }
 
-  // 🔊 2. Dismiss handler to remove an alert banner
   public dismissVoidNotification(id: string): void {
     this.voidNotifications.update(list => list.filter(n => n.id !== id));
   }
 
-  // 3. Your updated handler:
   private handleVoidNotification(notification: VoidNotificationItem): void {
-    // Play the chime
     this.playVoidAlertSound();
-
-    // Add to alerts signal
     this.voidNotifications.update(list => [notification, ...list]);
 
-    // Auto-dismiss banner after 8 seconds
     setTimeout(() => {
       this.dismissVoidNotification(notification.id);
     }, 8000);

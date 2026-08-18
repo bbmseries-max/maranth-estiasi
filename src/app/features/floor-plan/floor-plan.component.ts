@@ -29,8 +29,11 @@ export class FloorPlanComponent {
     const all = this.posService.tables().filter(t => t.id !== 'takeaway-counter' && t.zone !== 'Takeaway');
     const zone = this.selectedZone();
 
-    if (zone === 'ALL') return all;
-    return all.filter(t => (t.zone === zone || t.section === zone));
+    const result = zone === 'ALL' 
+      ? all 
+      : all.filter(t => (t.zone === zone || t.section === zone));
+
+    return this.sortTables(result);
   });
 
   public onTableSelect(table: RestaurantTable, event?: Event): void {
@@ -53,8 +56,8 @@ export class FloorPlanComponent {
     if (!takeawayTable) {
       takeawayTable = {
         id: 'takeaway-counter',
-        number: 99,
-        tableNumber: 99,
+        number: '99',
+        tableNumber: '99',
         name: '🛍️ Takeaway / Πακέτο',
         seats: 1,
         capacity: 1,
@@ -101,7 +104,7 @@ export class FloorPlanComponent {
     return notifications.some(n => n.tableId === table.id);
   }
 
-public getTableVisualStatus(table: RestaurantTable): TableVisualStatus {
+  public getTableVisualStatus(table: RestaurantTable): TableVisualStatus {
     if (this.isTableReady(table)) {
       return 'READY_TO_SERVE';
     }
@@ -143,7 +146,7 @@ public getTableVisualStatus(table: RestaurantTable): TableVisualStatus {
       case 'RESERVED':
         return 'border-purple-500/80 shadow-[0_0_15px_rgba(168,85,247,0.25)] bg-purple-950/20';
       case 'READY_TO_SERVE':
-        return 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)] bg-emerald-950/20';
+        return 'border-emerald-500 shadow-[0_0_15px_rgba(160,185,129,0.3)] bg-emerald-950/20';
       case 'PREPARING':
         return 'border-amber-500/80 shadow-[0_0_15px_rgba(245,158,11,0.2)] bg-amber-950/20';
       case 'BILL_PRINTED':
@@ -156,7 +159,7 @@ public getTableVisualStatus(table: RestaurantTable): TableVisualStatus {
     }
   }
 
- public async processPayment(tableId: string, method: 'CASH' | 'CARD', event?: Event): Promise<void> {
+  public async processPayment(tableId: string, method: 'CASH' | 'CARD', event?: Event): Promise<void> {
     if (event) {
       event.stopPropagation();
       event.stopImmediatePropagation();
@@ -178,7 +181,6 @@ public getTableVisualStatus(table: RestaurantTable): TableVisualStatus {
     const activeVaults = this.posService.activeVaultSessions();
     const isManagerRole = ['MANAGER', 'ADMIN', 'OWNER'].includes(String(currentEmp?.role || '').toUpperCase());
 
-    // 1. Vault resolution for Managers
     if (!myVault && isManagerRole && activeVaults.length > 0) {
       const selectedVaultId = this.promptSelectActiveWaiterVault(activeVaults);
       if (selectedVaultId) {
@@ -188,10 +190,7 @@ public getTableVisualStatus(table: RestaurantTable): TableVisualStatus {
       return;
     }
 
-    // 2. Standard Settlement
     await this.posService.settleTablePayment(tableId, method);
-
-    // 3. Return to floor plan
     this.router.navigate(['/floor-plan'], { replaceUrl: true });
   }
 
@@ -246,8 +245,7 @@ public getTableVisualStatus(table: RestaurantTable): TableVisualStatus {
     this.closingVault.set(null);
   }
 
-  // Open reservation prompt/dialog
-public async openReservationPrompt(table: RestaurantTable, event?: Event): Promise<void> {
+  public async openReservationPrompt(table: RestaurantTable, event?: Event): Promise<void> {
     if (event) event.stopPropagation();
 
     const customerName = prompt(`📅 Κράτηση για Τραπέζι ${table.number || table.tableNumber}\n\nΌνομα Πελάτη:`);
@@ -285,14 +283,11 @@ public async openReservationPrompt(table: RestaurantTable, event?: Event): Promi
     this.router.navigate(['/order', table.id]);
   }
 
-  /**
- * Natural sort for alphanumeric table numbers (e.g. A1, A2, A10, B1)
- */
-public sortTables(tables: RestaurantTable[]): RestaurantTable[] {
-  return [...tables].sort((a, b) => {
-    const valA = String(a.tableNumber ?? a.number ?? '');
-    const valB = String(b.tableNumber ?? b.number ?? '');
-    return valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
-  });
-}
+  public sortTables(tables: RestaurantTable[]): RestaurantTable[] {
+    return [...tables].sort((a, b) => {
+      const valA = String(a.tableNumber ?? a.number ?? '');
+      const valB = String(b.tableNumber ?? b.number ?? '');
+      return valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+    });
+  }
 }

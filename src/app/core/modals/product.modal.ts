@@ -16,6 +16,7 @@ export interface Product {
   name: string;
   categoryId: string;
   categoryName?: string;
+  station: 'BAR' | 'KITCHEN';
   price: number;
   purchasePrice?: number;
   costPrice?: number;
