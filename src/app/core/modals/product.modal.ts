@@ -16,7 +16,8 @@ export interface Product {
   name: string;
   categoryId: string;
   categoryName?: string;
-  station: 'BAR' | 'KITCHEN';
+  station?: 'BAR' | 'KITCHEN';
+  targetStation?: 'BAR' | 'KITCHEN';
   price: number;
   purchasePrice?: number;
   costPrice?: number;
