@@ -91,6 +91,9 @@ export class InventoryManagementComponent {
   public adjustNewStockCount = 0;
   public adjustReasonInput = '';
 
+  public newProdStation: 'BAR' | 'KITCHEN' = 'BAR';
+  public editProdStation: 'BAR' | 'KITCHEN' = 'BAR';
+
   public getRoleLabel(role: Role): string {
     switch (role) {
       case 'WAITER': return 'Σερβιτόρος';
@@ -171,8 +174,6 @@ export class InventoryManagementComponent {
     this.newProdCost = 0;
     this.showNewProductModal.set(false);
   }
-
-  public editProdStation: 'BAR' | 'KITCHEN' = 'BAR';
 
   public openEditProductModal(prod: Product): void {
     this.editingProduct.set(prod);
