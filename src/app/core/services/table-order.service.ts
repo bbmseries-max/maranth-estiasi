@@ -418,7 +418,7 @@ export class TableOrderService {
     const actualModifiers = modifiers.length > 0 ? modifiers : ((product as any).selectedModifiers || []);
     
     const pPrice = Number(product.price) || 0;
-    const extraCost = actualModifiers.reduce((acc: number, m: any) => acc + (Number(m.priceExtra) || 0), 0);
+    const extraCost = actualModifiers.reduce((acc: number, m: any) => acc + (Number(m.priceExtra || m.price) || 0), 0);
     const finalPrice = Number((pPrice + extraCost).toFixed(2));
 
     const fallbackWaiter: Employee = {
@@ -443,23 +443,56 @@ export class TableOrderService {
       grandTotal: 0
     };
 
-    const newItem: TableOrderItem = {
-      id: `ITEM-${Date.now()}`,
-      productId: product.id,
-      productName: product.name,
-      unitPrice: pPrice,
-      quantity: 1,
-      taxRate: product.taxRate || 13,
-      modifiers: actualModifiers,
-      finalItemPrice: finalPrice,
-      itemNotes: notes,
-      orderedByWaiterId: activeWaiter.id,
-      orderedByWaiterName: activeWaiter.name,
-      timestamp: new Date().toISOString(),
-      status: 'PENDING'
-    };
+    const currentItems = [...(existingOrder.items || [])];
 
-    const updatedItems = [...existingOrder.items, newItem];
+    // Helper to serialize modifiers for strict comparison
+    const getModKey = (mods: OrderModifier[] = []) =>
+      mods.map(m => String(m.optionId || m.id || m.name || m.optionName || '')).sort().join('|');
+
+    const incomingModKey = getModKey(actualModifiers);
+    const cleanNotes = (notes || '').trim();
+
+    // 🔍 Find if the exact item exists as unsent (PENDING)
+    const existingIndex = currentItems.findIndex(i =>
+      i.productId === product.id &&
+      i.status === 'PENDING' &&
+      getModKey(i.modifiers || []) === incomingModKey &&
+      (i.itemNotes || '').trim() === cleanNotes
+    );
+
+    let updatedItems: TableOrderItem[];
+
+    if (existingIndex > -1) {
+      // ➕ Merge: Increment quantity on existing line
+      const existing = currentItems[existingIndex];
+      const newQty = Number(existing.quantity || 1) + 1;
+      const updatedExisting: TableOrderItem = {
+        ...existing,
+        quantity: newQty
+      };
+      updatedItems = currentItems.map((item, idx) => idx === existingIndex ? updatedExisting : item);
+    } else {
+      // 🆕 Create new line
+      const newItem: TableOrderItem = {
+        id: `ITEM-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        storeId,
+        tenantId,
+        productId: product.id,
+        productName: product.name,
+        unitPrice: pPrice,
+        quantity: 1,
+        taxRate: product.taxRate || 13,
+        modifiers: actualModifiers,
+        finalItemPrice: finalPrice,
+        itemNotes: cleanNotes,
+        orderedByWaiterId: activeWaiter.id,
+        orderedByWaiterName: activeWaiter.name,
+        timestamp: new Date().toISOString(),
+        status: 'PENDING'
+      };
+      updatedItems = [...currentItems, newItem];
+    }
+
     const activeItems = updatedItems.filter(i => i.status !== 'VOIDED');
     
     const grandTotal = Number(activeItems.reduce((acc, i) => acc + (Number(i.finalItemPrice) * Number(i.quantity)), 0).toFixed(2));

@@ -423,22 +423,21 @@ export class RestaurantPosService {
     }
   }
 
- public logoutEmployee(): void {
-  // 1. Clear all local storage and session tokens
-  localStorage.removeItem('current_employee');
-  localStorage.removeItem('maranth_pos_employee');
-  sessionStorage.removeItem('current_employee');
-  sessionStorage.clear();
+public logoutEmployee(): void {
+    // 1. Clear credentials from storage
+    localStorage.removeItem('current_employee');
+    localStorage.removeItem('maranth_pos_employee');
+    sessionStorage.removeItem('current_employee');
+    sessionStorage.clear();
 
-  // 2. Run state reset and navigation inside NgZone
-  this.ngZone.run(() => {
+    // 2. Reset in-memory signals
     this.authShiftService.currentEmployee.set(null);
     this.authShiftService.activeWorkShift.set(null);
     this.activeVaultSession.set(null);
 
+    // 3. Navigate back to login
     this.router.navigate(['/login'], { replaceUrl: true });
-  });
-}
+  }
 
   public clockInShift(notes?: string): void {
     this.authShiftService.clockInShift(notes);
@@ -1021,6 +1020,8 @@ export class RestaurantPosService {
 
     // 5. Hard logout if active user closed their own shift (reuses currentEmp from line 2)
     if (currentEmp) {
+      const currentEmp = this.currentEmployee();
+    if (currentEmp) {
       const curId = String(currentEmp.id || '').trim().toLowerCase();
       const curName = String(currentEmp.name || '').trim().toLowerCase();
       const curPin = String(currentEmp.pin || currentEmp.pinCode || '').trim().toLowerCase();
@@ -1038,7 +1039,7 @@ export class RestaurantPosService {
       }
     }
   }
-
+  }
   public closeDayAndGenerateZReport(): DailyZReportSnapshot {
     const emp = this.currentEmployee();
     const { tenantId, storeId } = this.getActiveTenantAndStore();
