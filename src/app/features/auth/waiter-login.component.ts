@@ -8,6 +8,7 @@ import { Router } from '@angular/router';
 import { DevicePairingService } from '../../core/services/device-pairing.service';
 import { AuthShiftService } from '../../core/services/auth-shift.service'; 
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
+import { AutoLogoutService } from '../../core/services/auto-logout.service'; // 👈 Added
 import { Employee } from '../../core/modals';
 
 @Component({
@@ -20,6 +21,7 @@ export class WaiterLoginComponent implements OnInit {
   public deviceService = inject(DevicePairingService);
   public authShiftService = inject(AuthShiftService);
   public posService = inject(RestaurantPosService);
+  private autoLogoutService = inject(AutoLogoutService); // 👈 Injected
   private router = inject(Router);
 
   // States: DEVICE_SETUP -> PIN_ENTRY -> SHIFT_SETUP
@@ -38,7 +40,7 @@ export class WaiterLoginComponent implements OnInit {
   // Active Store Info computed from License
   public activeShop = computed(() => this.deviceService.currentLicense());
 
- ngOnInit(): void {
+  ngOnInit(): void {
     this.enteredPin.set('');
     this.errorMessage.set('');
     this.supportsBiometrics = !!(window.PublicKeyCredential);
@@ -113,7 +115,6 @@ export class WaiterLoginComponent implements OnInit {
     this.errorMessage.set('');
 
     try {
-      // Execute through RestaurantPosService to sync POS state and open drawer
       const employee = await this.posService.loginWithPin(pinValue);
 
       if (employee) {
@@ -130,10 +131,13 @@ export class WaiterLoginComponent implements OnInit {
   }
 
   private handleSuccessfulLogin(employee: Employee): void {
+    // 👈 Start monitoring on successful PIN authentication
+    this.autoLogoutService.startMonitoring();
     this.redirectByRole(employee.role);
   }
 
   public cancelShiftSetup(): void {
+    this.autoLogoutService.stopMonitoring();
     this.posService.logoutEmployee();
     this.enteredPin.set('');
     this.step.set('PIN_ENTRY');
@@ -142,11 +146,12 @@ export class WaiterLoginComponent implements OnInit {
   public startShiftAndVault(selectedEmp?: Employee): void {
     const floatAmount = Number(this.startingFloat) >= 0 ? Number(this.startingFloat) : 0;
     
-    // Prefer the explicitly selected/authenticated employee on THIS device
     const emp = selectedEmp || this.posService.currentEmployee();
     
     if (emp) {
       this.posService.setLoggedInEmployee(emp, floatAmount);
+      // 👈 Start monitoring when shift is initiated
+      this.autoLogoutService.startMonitoring();
       this.redirectByRole(emp.role);
     } else {
       this.router.navigate(['/floor-plan'], { replaceUrl: true });
@@ -158,7 +163,7 @@ export class WaiterLoginComponent implements OnInit {
     if (r === 'KITCHEN' || r === 'CHEF') {
       this.router.navigate(['/kitchen'], { replaceUrl: true });
     } else if (r === 'BAR' || r === 'BARISTA' || r === 'BARMAN') {
-      this.router.navigate(['/kitchen'], { replaceUrl: true }); // or /bar if separate
+      this.router.navigate(['/kitchen'], { replaceUrl: true });
     } else {
       this.router.navigate(['/floor-plan'], { replaceUrl: true });
     }
