@@ -1030,7 +1030,8 @@ export class RestaurantPosService {
 
       const isSelf = 
         (vaultWaiterId && (vaultWaiterId === curId || vaultWaiterId === curPin)) ||
-        (vaultWaiterName && vaultWaiterName === curName);
+        (vaultWaiterName && vaultWaiterName === curName) ||
+        (curId && vaultWaiterId.includes(curId));
 
       if (isSelf) {
         this.logoutEmployee();
