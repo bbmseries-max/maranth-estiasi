@@ -388,11 +388,7 @@ export class RestaurantPosService {
     const result: any = await this.authShiftService.loginWithPin(pin);
     const emp: Employee | null = result?.employee || (result?.id ? result : null);
     
-    if (emp) {
-      this.setLoggedInEmployee(emp);
       return emp;
-    }
-    return null;
   }
 
   public setLoggedInEmployee(emp: Employee, customFloat: number = 0): void {
@@ -1025,8 +1021,8 @@ export class RestaurantPosService {
 
     if (currentEmp && (currentEmpId === targetEmpKey || currentEmpName === targetEmpKey || currentEmpPin === targetEmpKey)) {
       this.logoutEmployee();
-    }
   }
+}
 
   public closeDayAndGenerateZReport(): DailyZReportSnapshot {
     const emp = this.currentEmployee();

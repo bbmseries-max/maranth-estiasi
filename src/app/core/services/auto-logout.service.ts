@@ -115,31 +115,16 @@ export class AutoLogoutService implements OnDestroy {
     }
   }
 
-  public performAutoLogout(customReason?: string): void {
-    const emp = this.getCurrentUser();
-    if (!emp) return;
+ public performAutoLogout(customReason?: string): void {
+  const emp = this.getCurrentUser();
+  if (!emp) return;
 
-    const reason = customReason || `Αυτόματη αποσύνδεση λόγω αδράνειας (15 λ.) - ${emp.name}`;
-    console.warn(`🔒 ${reason}`);
+  const reason = customReason || `Αυτόματη αποσύνδεση λόγω αδράνειας (15 λ.) - ${emp.name}`;
+  console.warn(`🔒 ${reason}`);
 
-    this.stopMonitoring();
-
-    if (this.posService.logAudit) {
-      this.posService.logAudit('AUTO_LOGOUT', reason);
-    }
-
-    if (this.authShiftService?.logoutEmployee) {
-      this.authShiftService.logoutEmployee();
-    }
-    if (this.posService?.logoutEmployee) {
-      this.posService.logoutEmployee();
-    }
-
-    localStorage.removeItem('current_employee');
-    localStorage.removeItem('maranth_pos_employee');
-
-    this.router.navigate(['/login'], { replaceUrl: true });
-  }
+  this.stopMonitoring();
+  this.posService.logoutEmployee(); // Calls posService.logoutEmployee() which handles cleanup + redirect to /login
+}
 
   private getCurrentUser() {
     return this.authShiftService?.currentEmployee?.() || this.posService?.currentEmployee?.();

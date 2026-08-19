@@ -8,7 +8,7 @@ import { Router } from '@angular/router';
 import { DevicePairingService } from '../../core/services/device-pairing.service';
 import { AuthShiftService } from '../../core/services/auth-shift.service'; 
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
-import { AutoLogoutService } from '../../core/services/auto-logout.service'; // 👈 Added
+import { AutoLogoutService } from '../../core/services/auto-logout.service';
 import { Employee } from '../../core/modals';
 
 @Component({
@@ -21,23 +21,20 @@ export class WaiterLoginComponent implements OnInit {
   public deviceService = inject(DevicePairingService);
   public authShiftService = inject(AuthShiftService);
   public posService = inject(RestaurantPosService);
-  private autoLogoutService = inject(AutoLogoutService); // 👈 Injected
+  private autoLogoutService = inject(AutoLogoutService);
   private router = inject(Router);
 
-  // States: DEVICE_SETUP -> PIN_ENTRY -> SHIFT_SETUP
   public step = signal<'DEVICE_SETUP' | 'PIN_ENTRY' | 'SHIFT_SETUP'>('PIN_ENTRY');
+  public pendingEmployee = signal<Employee | null>(null); // 👈 Holds employee while picking float
   
-  // Device Pairing Signals
   public licenseInput = signal<string>('');
   public isActivating = signal<boolean>(false);
 
-  // Waiter Auth Signals
   public enteredPin = signal<string>('');
   public errorMessage = signal<string>('');
-  public startingFloat: number = 0;
+  public startingFloat: number = 50; // Default preset
   public supportsBiometrics = false;
 
-  // Active Store Info computed from License
   public activeShop = computed(() => this.deviceService.currentLicense());
 
   ngOnInit(): void {
@@ -52,46 +49,6 @@ export class WaiterLoginComponent implements OnInit {
     }
   }
 
-  // --- 🔑 DEVICE PAIRING ACTIONS ---
-  public async submitActivationKey(): Promise<void> {
-    const key = this.licenseInput().trim();
-    if (!key) {
-      this.errorMessage.set('Παρακαλώ εισάγετε κλειδί άδειας.');
-      return;
-    }
-
-    this.isActivating.set(true);
-    this.errorMessage.set('');
-
-    const res = await this.deviceService.activateDeviceWithKey(key);
-    this.isActivating.set(false);
-
-    if (res.success) {
-      this.errorMessage.set('');
-      this.step.set('PIN_ENTRY');
-    } else {
-      this.errorMessage.set(res.message);
-    }
-  }
-
-  public quickSetKey(key: string): void {
-    this.licenseInput.set(key);
-    this.submitActivationKey();
-  }
-
-  public promptUnpairDevice(): void {
-    const code = prompt('Εισάγετε Master PIN για αποσύνδεση τερματικού:');
-    if (code === '9999' || code === '0000') {
-      this.deviceService.unpairDevice();
-      this.step.set('DEVICE_SETUP');
-      this.enteredPin.set('');
-      this.errorMessage.set('');
-    } else if (code) {
-      alert('⚠️ Λάθος κωδικός εξουσιοδότησης.');
-    }
-  }
-
-  // --- ⚡ STAFF PIN PAD ACTIONS ---
   public appendDigit(digit: string): void {
     if (this.enteredPin().length < 8) {
       this.enteredPin.update(pin => pin + digit);
@@ -108,17 +65,21 @@ export class WaiterLoginComponent implements OnInit {
     this.errorMessage.set('');
   }
 
-public async submitPin(): Promise<void> {
+  public async submitPin(): Promise<void> {
     const pinValue = this.enteredPin().trim();
     if (!pinValue) return;
 
     this.errorMessage.set('');
 
     try {
-      const employee = await this.posService.loginWithPin(pinValue);
+      // Find employee by PIN from the loaded employees list
+      const employees = this.posService.employees();
+      const employee = employees.find(e => 
+        (e.pinCode === pinValue || e.pin === pinValue) && (e.isActive ?? e.active ?? true)
+      );
 
       if (employee) {
-        this.handleSuccessfulLogin(employee);
+        this.handleSuccessfulAuth(employee);
       } else {
         this.errorMessage.set('Άκυρος κωδικός PIN. Παρακαλώ δοκιμάστε ξανά.');
         this.enteredPin.set('');
@@ -130,69 +91,83 @@ public async submitPin(): Promise<void> {
     }
   }
 
-private handleSuccessfulLogin(employee: Employee): void {
-    // Check ONLY for currently OPEN vaults belonging to this employee
-    const activeVaults = this.posService.activeVaultSessions?.() || [];
+  private handleSuccessfulAuth(employee: Employee): void {
+    const activeVaults = this.posService.activeVaultSessions() || [];
     const cleanPin = (employee.pinCode || employee.pin || '').trim();
 
-    const hasOpenVault = activeVaults.some(
-      v => v.status === 'OPEN' && (v.waiterId === employee.id || v.waiterId === cleanPin)
+    // Check if employee ALREADY has an active OPEN vault session
+    const existingVault = activeVaults.find(
+      v => v.status === 'OPEN' && (v.waiterId === employee.id || v.waiterId === cleanPin || v.waiterName === employee.name)
     );
 
-    if (hasOpenVault) {
+    if (existingVault) {
+      // Already has an active open vault: Log in directly without re-prompting float
+      this.posService.setLoggedInEmployee(employee, existingVault.startingFloat);
       this.autoLogoutService.startMonitoring();
       this.redirectByRole(employee.role);
     } else {
-      // Prompt for starting float
+      // New shift: Prompt for starting float
+      this.pendingEmployee.set(employee);
       this.startingFloat = 50;
       this.step.set('SHIFT_SETUP');
     }
   }
 
-  public async startShiftAndVault(selectedEmp?: Employee): Promise<void> {
-    const floatAmount = Number(this.startingFloat) >= 0 ? Number(this.startingFloat) : 0;
-    const emp = selectedEmp || this.posService.currentEmployee();
+  public async startShiftAndVault(): Promise<void> {
+    const emp = this.pendingEmployee() || this.posService.currentEmployee();
 
     if (!emp) {
       this.step.set('PIN_ENTRY');
       return;
     }
 
-    // 1. Set current employee with starting float in POS service
+    const floatAmount = Number(this.startingFloat) >= 0 ? Number(this.startingFloat) : 0;
+
+    // Set employee AND create vault with the chosen float amount
     await this.posService.setLoggedInEmployee(emp, floatAmount);
-
-    // 2. Start global auto-logout idle timer
     this.autoLogoutService.startMonitoring();
-
-    // 3. Navigate to floor plan
     this.redirectByRole(emp.role);
+  }
+
+  public cancelShiftSetup(): void {
+    this.pendingEmployee.set(null);
+    this.enteredPin.set('');
+    this.errorMessage.set('');
+    this.step.set('PIN_ENTRY');
   }
 
   private redirectByRole(role?: string): void {
     const r = (role || '').toUpperCase();
-    if (r === 'KITCHEN' || r === 'CHEF') {
-      this.router.navigate(['/kitchen'], { replaceUrl: true });
-    } else if (r === 'BAR' || r === 'BARISTA' || r === 'BARMAN') {
+    if (r === 'KITCHEN' || r === 'CHEF' || r === 'BAR' || r === 'BARISTA') {
       this.router.navigate(['/kitchen'], { replaceUrl: true });
     } else {
       this.router.navigate(['/floor-plan'], { replaceUrl: true });
     }
   }
-  // src/app/features/waiter-login/waiter-login.component.ts
 
-  public cancelShiftSetup(): void {
-    // 1. Stop any running idle monitor
-    this.autoLogoutService.stopMonitoring();
+  public async submitActivationKey(): Promise<void> {
+    const key = this.licenseInput().trim();
+    if (!key) return;
+    this.isActivating.set(true);
+    const res = await this.deviceService.activateDeviceWithKey(key);
+    this.isActivating.set(false);
+    if (res.success) {
+      this.step.set('PIN_ENTRY');
+    } else {
+      this.errorMessage.set(res.message);
+    }
+  }
 
-    // 2. Clear current employee state in POS service
-    this.posService.logoutEmployee();
+  public quickSetKey(key: string): void {
+    this.licenseInput.set(key);
+    this.submitActivationKey();
+  }
 
-    // 3. Reset input states
-    this.enteredPin.set('');
-    this.errorMessage.set('');
-    this.startingFloat = 0;
-
-    // 4. Return to PIN pad screen
-    this.step.set('PIN_ENTRY');
+  public promptUnpairDevice(): void {
+    const code = prompt('Εισάγετε Master PIN:');
+    if (code === '9999' || code === '0000') {
+      this.deviceService.unpairDevice();
+      this.step.set('DEVICE_SETUP');
+    }
   }
 }
