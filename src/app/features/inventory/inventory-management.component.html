@@ -224,6 +224,7 @@
                   <tr class="border-b border-slate-800 text-slate-400 font-bold uppercase">
                     <th class="py-2.5 px-3">Προϊόν</th>
                     <th class="py-2.5 px-3">Κατηγορία</th>
+                    <th class="py-3 px-3 text-left">Σταθμός</th>
                     <th class="py-2.5 px-3">Τιμή Πώλησης</th>
                     <th class="py-2.5 px-3">Κόστος Αγοράς</th>
                     <th class="py-2.5 px-3">ΦΠΑ</th>
@@ -232,32 +233,49 @@
                   </tr>
                 </thead>
                 <tbody>
-                  @for (prod of posService.products(); track prod.id) {
-                    <tr class="border-b border-slate-800/60 hover:bg-slate-800/40 transition-colors">
-                      <td class="py-3 px-3 font-bold text-white">{{ prod.name }}</td>
-                      <td class="py-3 px-3 text-slate-400 font-medium">{{ prod.categoryName || 'Γενικά' }}</td>
-                      <td class="py-3 px-3 font-black text-emerald-400">€{{ (prod.price || 0).toFixed(2) }}</td>
-                      <td class="py-3 px-3 text-slate-300 font-bold">€{{ (prod.purchasePrice || prod.costPrice || 0).toFixed(2) }}</td>
-                      <td class="py-3 px-3 font-bold text-amber-400">{{ prod.taxRate || 13 }}%</td>
-                      <td class="py-3 px-3">
-                        <span class="px-2 py-0.5 rounded-full text-[10px] font-black border"
-                              [ngClass]="(prod.isActive ?? true) ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' : 'bg-red-500/20 text-red-400 border-red-500/40'">
-                          {{ (prod.isActive ?? true) ? '🟢 Ενεργό' : '🔴 Ανενεργό' }}
-                        </span>
-                      </td>
-                      <td class="py-3 px-3 text-right flex justify-end gap-2">
-                        <button (click)="openEditProductModal(prod)"
-                                class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-[10px] font-bold transition-all active:scale-95 cursor-pointer">
-                          ✏️ Επεξεργασία
-                        </button>
-                        <button (click)="deleteProduct(prod.id)"
-                                class="px-2 py-1 rounded-lg bg-red-950/60 hover:bg-red-900/80 text-red-400 border border-red-500/30 text-[10px] font-bold transition-all active:scale-95 cursor-pointer">
-                          🗑️
-                        </button>
-                      </td>
-                    </tr>
-                  }
-                </tbody>
+  @for (prod of posService.products(); track prod.id) {
+    <tr class="border-b border-slate-800/60 hover:bg-slate-800/40 transition-colors">
+      <td class="py-3 px-3 font-bold text-white">{{ prod.name }}</td>
+      <td class="py-3 px-3 text-slate-400 font-medium">{{ prod.categoryName || 'Γενικά' }}</td>
+      
+      <!-- 📍 STATION BADGE (BAR vs KITCHEN) -->
+      <td class="py-3 px-3">
+        <span class="px-2 py-0.5 rounded-full text-[10px] font-black border inline-flex items-center gap-1"
+              [ngClass]="prod.station === 'BAR' 
+                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' 
+                : 'bg-amber-500/20 text-amber-300 border-amber-500/40'">
+          {{ prod.station === 'BAR' ? '☕ Bar' : '🍳 Κουζίνα' }}
+        </span>
+      </td>
+
+      <td class="py-3 px-3 font-black text-emerald-400">€{{ (prod.price || 0).toFixed(2) }}</td>
+      <td class="py-3 px-3 text-slate-300 font-bold">€{{ (prod.purchasePrice || prod.costPrice || 0).toFixed(2) }}</td>
+      <td class="py-3 px-3 font-bold text-amber-400">{{ prod.taxRate || 13 }}%</td>
+      
+      <!-- STATUS BADGE -->
+      <td class="py-3 px-3">
+        <span class="px-2 py-0.5 rounded-full text-[10px] font-black border"
+              [ngClass]="(prod.isActive ?? true) ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' : 'bg-red-500/20 text-red-400 border-red-500/40'">
+          {{ (prod.isActive ?? true) ? '🟢 Ενεργό' : '🔴 Ανενεργό' }}
+        </span>
+      </td>
+
+      <!-- ACTIONS -->
+      <td class="py-3 px-3 text-right">
+        <div class="flex justify-end gap-2">
+          <button (click)="openEditProductModal(prod)"
+                  class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-[10px] font-bold transition-all active:scale-95 cursor-pointer">
+            ✏️ Επεξεργασία
+          </button>
+          <button (click)="deleteProduct(prod.id)"
+                  class="px-2 py-1 rounded-lg bg-red-950/60 hover:bg-red-900/80 text-red-400 border border-red-500/30 text-[10px] font-bold transition-all active:scale-95 cursor-pointer">
+            🗑️
+          </button>
+        </div>
+      </td>
+    </tr>
+  }
+</tbody>
               </table>
             </div>
           </div>

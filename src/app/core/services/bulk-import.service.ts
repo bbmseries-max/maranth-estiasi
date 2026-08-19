@@ -119,6 +119,7 @@ export class BulkImportService {
       if (values.length === 0 || values.every(v => v === '')) continue;
 
       const rawItem: Record<string, any> = {};
+      
 
       Object.entries(headerMap).forEach(([field, colIdx]) => {
         if (colIdx !== -1 && colIdx < values.length) {

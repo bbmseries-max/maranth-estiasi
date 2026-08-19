@@ -172,6 +172,8 @@ export class InventoryManagementComponent {
     this.showNewProductModal.set(false);
   }
 
+  public editProdStation: 'BAR' | 'KITCHEN' = 'BAR';
+
   public openEditProductModal(prod: Product): void {
     this.editingProduct.set(prod);
     this.editProdName = prod.name;
@@ -180,20 +182,43 @@ export class InventoryManagementComponent {
     this.editProdCost = prod.purchasePrice || prod.costPrice || 0;
     this.editProdVat = prod.taxRate || 13;
     this.editProdIsPined = !!prod.isPinnedToPOS;
+
+    // Pre-fill existing station, or detect from name/category if missing
+  const isDrink = /drink|coffee|bar|beverage|καφέ|ποτό|ποτα|ροφήμα|κρασί|μπύρα|vodka|shot/i.test(
+    `${prod.categoryName || ''} ${prod.categoryId || ''} ${prod.name}`
+  );
+  this.editProdStation = prod.station || (isDrink ? 'BAR' : 'KITCHEN');
   }
 
   public saveProductEdit(): void {
     const prod = this.editingProduct();
     if (!prod || !this.editProdName.trim()) return;
 
-   this.posService.updateProduct(prod.id, {
-  name: this.editProdName.trim(),
-  categoryId: this.editProdCategoryId,
-  price: Number(this.editProdPrice) || 0,
-  costPrice: Number(this.editProdCost) || 0,
-  taxRate: (Number(this.editProdVat) || 13) as GreekVatRate,
-  isPinnedToPOS: this.editProdIsPined
-});
+    // 1. Get categories directly from the service (or fallback to empty array)
+  const categories = (this.posService as any).categories?.() || [];
+  const cat = categories.find((c: any) => c.id === this.editProdCategoryId);
+  const catName = cat?.name || prod.categoryName || '';
+
+    // 2. Determine fallback station (BAR vs KITCHEN) if not explicitly set in form
+    const isDrink = /drink|coffee|bar|beverage|καφέ|ποτό|ποτα|ροφήμα|κρασί|μπύρα|vodka|shot/i.test(
+      `${catName} ${this.editProdCategoryId} ${this.editProdName}`
+    );
+
+    const resolvedStation: 'BAR' | 'KITCHEN' = (this as any).editProdStation 
+      || prod.station 
+      || (isDrink ? 'BAR' : 'KITCHEN');
+
+    // 3. Save updated product
+    this.posService.updateProduct(prod.id, {
+      name: this.editProdName.trim(),
+      categoryId: this.editProdCategoryId,
+      categoryName: catName,
+      station: resolvedStation, // 👈 Assigned here
+      price: Number(this.editProdPrice) || 0,
+      costPrice: Number(this.editProdCost) || 0,
+      taxRate: (Number(this.editProdVat) || 13) as GreekVatRate,
+      isPinnedToPOS: this.editProdIsPined
+    });
 
     this.editingProduct.set(null);
   }
