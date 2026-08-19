@@ -1,6 +1,7 @@
+// src/app/core/services/thermal-printer.service.ts
+
 import { Injectable } from '@angular/core';
 import { DailyZReportSnapshot, WaiterVaultSession } from '../modals/restaurant-pos.modals';
-
 
 @Injectable({
   providedIn: 'root'
@@ -197,8 +198,6 @@ export class ThermalPrinterService {
       printWin.document.close();
     }
   }
-
-  // Add to src/app/core/services/thermal-printer.service.ts
 
   /**
    * Prints 80mm Table Bill / Proforma Receipt (Προτιμολόγιο / Λογαριασμός)

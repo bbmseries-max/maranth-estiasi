@@ -3,15 +3,15 @@
 import { Component, inject, signal, computed, OnInit, OnDestroy, ChangeDetectionStrategy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule, DatePipe, CurrencyPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { AuthShiftService } from '../../core/services/auth-shift.service';
 import { RouterLink } from '@angular/router';
+import { AuthShiftService } from '../../core/services/auth-shift.service';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
-import { DailyZReportSnapshot } from '../../core/modals/restaurant-pos.modals';
 import { ThermalPrinterService } from '../../core/services/thermal-printer.service';
 import { 
   AuditLog, 
   WorkShiftLog, 
   WaiterVaultSession,
+  DailyZReportSnapshot,
   Employee 
 } from '../../core/modals/restaurant-pos.modals';
 
@@ -20,7 +20,7 @@ import {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [CommonModule, FormsModule, RouterLink, DatePipe],
-  templateUrl: `./shift-reports.component.html`
+  templateUrl: './shift-reports.component.html'
 })
 export class ShiftReportsComponent implements OnInit, OnDestroy {
   public authShiftService = inject(AuthShiftService);
@@ -207,7 +207,6 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
     );
 
     if (employeeVault) {
-      // Direct user to the counting modal so money is counted and properly credited
       this.openCloseVaultModal(employeeVault);
       return;
     }

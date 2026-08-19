@@ -108,7 +108,7 @@ export class WaiterLoginComponent implements OnInit {
     this.errorMessage.set('');
   }
 
-  public async submitPin(): Promise<void> {
+public async submitPin(): Promise<void> {
     const pinValue = this.enteredPin().trim();
     if (!pinValue) return;
 
@@ -131,9 +131,22 @@ export class WaiterLoginComponent implements OnInit {
   }
 
   private handleSuccessfulLogin(employee: Employee): void {
-    // 👈 Start monitoring on successful PIN authentication
-    this.autoLogoutService.startMonitoring();
-    this.redirectByRole(employee.role);
+    // 1. Check if employee already has an open active vault session
+    const activeVaults = this.posService.activeVaultSessions?.() || [];
+    const cleanPin = (employee.pinCode || employee.pin || '').trim();
+    const hasOpenVault = activeVaults.some(
+      v => (v.waiterId === employee.id || v.waiterId === cleanPin || v.waiterName === employee.name) && v.status === 'OPEN'
+    );
+
+    // 2. If they already have an active shift/vault, go straight in
+    if (hasOpenVault) {
+      this.autoLogoutService.startMonitoring();
+      this.redirectByRole(employee.role);
+    } else {
+      // 3. Otherwise, show the Starting Float / Shift Setup screen
+      this.startingFloat = 50; // Default preset to €50.00
+      this.step.set('SHIFT_SETUP');
+    }
   }
 
   public cancelShiftSetup(): void {

@@ -105,45 +105,43 @@
       </div>
     }
 
-    <!-- 💰 STAGE 3: SHIFT SETUP & VAULT FLOAT -->
-    @if (step() === 'SHIFT_SETUP') {
-      <div class="w-full flex flex-col gap-4 animate-fade-in">
-        <div class="bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl flex items-center gap-3">
-          <span class="text-3xl">👤</span>
-          <div>
-            <div class="font-black text-white text-base">{{ posService.currentEmployee()?.name }}</div>
-            <div class="text-xs text-amber-400 font-bold">Ρόλος: {{ posService.getRoleLabel(posService.currentEmployee()?.role || 'WAITER') }}</div>
-          </div>
-        </div>
+  @if (step() === 'SHIFT_SETUP') {
+  <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl max-w-md w-full flex flex-col gap-5">
+    <div class="text-center">
+      <h2 class="text-lg font-black text-white m-0">💰 Άνοιγμα Βάρδιας & Ταμείου</h2>
+      <p class="text-xs text-slate-400 mt-1">
+        Εισάγετε το αρχικό ποσό μετρητών (ρέστα) που παραλαμβάνετε στο πορτοφόλι σας.
+      </p>
+    </div>
 
-        <div class="flex flex-col gap-2 bg-slate-950 border border-slate-800 p-4 rounded-2xl">
-          <label class="text-xs font-black text-slate-300 uppercase tracking-wider flex justify-between items-center">
-            <span>💰 Αρχικό Ταμείο / Ρέστα (€)</span>
-            <span class="text-[10px] text-emerald-400 font-bold">Επεξεργάσιμο</span>
-          </label>
-          
-          <input type="number" step="5" min="0" [(ngModel)]="startingFloat"
-                 class="w-full bg-slate-900 border-2 border-emerald-500/80 rounded-xl px-4 py-3 text-3xl font-black text-emerald-400 text-center focus:outline-none focus:border-amber-400 shadow-inner" />
-
-          <!-- Quick Float Presets -->
-          <div class="grid grid-cols-4 gap-2 mt-1">
-            <button (click)="startingFloat = 0" class="py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 cursor-pointer">€0</button>
-            <button (click)="startingFloat = 20" class="py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 cursor-pointer">€20</button>
-            <button (click)="startingFloat = 50" class="py-1.5 rounded-lg bg-amber-500/20 text-amber-400 font-bold text-xs border border-amber-500/40 cursor-pointer">€50</button>
-            <button (click)="startingFloat = 100" class="py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 cursor-pointer">€100</button>
-          </div>
-        </div>
-
-        <div class="flex gap-2">
-          <button (click)="cancelShiftSetup()" class="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-slate-300 text-xs cursor-pointer">
-            ⬅️ Ακύρωση
-          </button>
-          <button (click)="startShiftAndVault()" class="flex-1 py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-base transition-all shadow-lg active:scale-95 cursor-pointer">
-            🚀 Έναρξη & Είσοδος (€{{ startingFloat }})
-          </button>
-        </div>
+    <!-- STARTING FLOAT INPUT -->
+    <div class="flex flex-col gap-2">
+      <label class="text-[11px] font-bold text-slate-400 uppercase text-center">Αρχικό Ταμείο (€)</label>
+      <input type="number" 
+             step="5" 
+             [(ngModel)]="startingFloat" 
+             class="bg-slate-950 border border-slate-700 rounded-2xl py-4 text-3xl font-black text-center text-emerald-400 focus:outline-none focus:border-amber-400" />
+      
+      <!-- QUICK PRESET BUTTONS -->
+      <div class="grid grid-cols-4 gap-2 mt-1">
+        <button type="button" (click)="startingFloat = 0" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300">€0</button>
+        <button type="button" (click)="startingFloat = 30" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300">€30</button>
+        <button type="button" (click)="startingFloat = 50" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-emerald-400 border border-emerald-500/30">€50</button>
+        <button type="button" (click)="startingFloat = 100" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300">€100</button>
       </div>
-    }
+    </div>
+
+    <!-- ACTION BUTTONS -->
+    <div class="flex gap-2 pt-3 border-t border-slate-800">
+      <button (click)="cancelShiftSetup()" class="flex-1 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 font-bold text-slate-300 text-xs cursor-pointer">
+        Ακύρωση
+      </button>
+      <button (click)="startShiftAndVault()" class="flex-1 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-black text-white text-xs shadow-lg cursor-pointer transition-all active:scale-95">
+        ✓ Έναρξη Βάρδιας
+      </button>
+    </div>
+  </div>
+}
 
     <!-- ERROR ALERT -->
     @if (errorMessage()) {
