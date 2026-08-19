@@ -1,6 +1,6 @@
 // src/app/core/services/restaurant-pos.service.ts
 
-import { Injectable, signal, computed, inject } from '@angular/core';
+import { Injectable, signal, computed, inject, NgZone } from '@angular/core';
 import { Router } from '@angular/router';
 import { initializeApp } from 'firebase/app';
 import { 
@@ -68,6 +68,7 @@ function normalizeKey(val?: string | null): string {
   providedIn: 'root'
 })
 export class RestaurantPosService {
+  private ngZone = inject(NgZone);
   public tenantContext = inject(TenantContextService);
   public db: any = null;
   private router = inject(Router);
@@ -422,17 +423,22 @@ export class RestaurantPosService {
     }
   }
 
-  public logoutEmployee(): void {
+ public logoutEmployee(): void {
+  // 1. Clear all local storage and session tokens
+  localStorage.removeItem('current_employee');
+  localStorage.removeItem('maranth_pos_employee');
+  sessionStorage.removeItem('current_employee');
+  sessionStorage.clear();
+
+  // 2. Run state reset and navigation inside NgZone
+  this.ngZone.run(() => {
     this.authShiftService.currentEmployee.set(null);
     this.authShiftService.activeWorkShift.set(null);
     this.activeVaultSession.set(null);
-    
-    localStorage.removeItem('current_employee');
-    localStorage.removeItem('maranth_pos_employee');
-    sessionStorage.removeItem('current_employee');
 
     this.router.navigate(['/login'], { replaceUrl: true });
-  }
+  });
+}
 
   public clockInShift(notes?: string): void {
     this.authShiftService.clockInShift(notes);
@@ -1013,16 +1019,24 @@ export class RestaurantPosService {
       `Κλείσιμο ταμείου (${closedSession.waiterName}): Μετρητά €${cash.toFixed(2)}, Κάρτες €${card.toFixed(2)}. Παράδοση: €${handedOver.toFixed(2)}`
     );
 
-    // 5. Hard logout if active user closed their own shift
-    const targetEmpKey = String(targetEmpId).trim().toLowerCase();
-    const currentEmpId = String(currentEmp?.id || '').trim().toLowerCase();
-    const currentEmpName = String(currentEmp?.name || '').trim().toLowerCase();
-    const currentEmpPin = String(currentEmp?.pin || currentEmp?.pinCode || '').trim().toLowerCase();
+    // 5. Hard logout if active user closed their own shift (reuses currentEmp from line 2)
+    if (currentEmp) {
+      const curId = String(currentEmp.id || '').trim().toLowerCase();
+      const curName = String(currentEmp.name || '').trim().toLowerCase();
+      const curPin = String(currentEmp.pin || currentEmp.pinCode || '').trim().toLowerCase();
 
-    if (currentEmp && (currentEmpId === targetEmpKey || currentEmpName === targetEmpKey || currentEmpPin === targetEmpKey)) {
-      this.logoutEmployee();
+      const vaultWaiterId = String(closedSession.waiterId || '').trim().toLowerCase();
+      const vaultWaiterName = String(closedSession.waiterName || '').trim().toLowerCase();
+
+      const isSelf = 
+        (vaultWaiterId && (vaultWaiterId === curId || vaultWaiterId === curPin)) ||
+        (vaultWaiterName && vaultWaiterName === curName);
+
+      if (isSelf) {
+        this.logoutEmployee();
+      }
+    }
   }
-}
 
   public closeDayAndGenerateZReport(): DailyZReportSnapshot {
     const emp = this.currentEmployee();
