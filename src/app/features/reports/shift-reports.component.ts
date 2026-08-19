@@ -123,6 +123,21 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
 
     await this.posService.closeWaiterVaultSession(closedVault);
 
+    // 2. 👈 Clock out the employee from active shifts
+    if (vault.waiterId) {
+      await this.authShiftService.clockOutEmployeeShift(
+        vault.waiterId,
+        `Κλείσιμο ταμείου/βάρδιας - Παραδόθηκαν: €${count}`
+      );
+    }
+
+    // 3. If the currently logged-in user closed their own vault, log them out
+    const current = this.posService.currentEmployee();
+    if (current && (current.id === vault.waiterId || current.name === vault.waiterName)) {
+      this.posService.logoutEmployee();
+      this.authShiftService.logoutEmployee();
+    }
+
     this.closingVault.set(null);
     this.cdr.markForCheck();
   }

@@ -130,45 +130,42 @@ public async submitPin(): Promise<void> {
     }
   }
 
-  private handleSuccessfulLogin(employee: Employee): void {
-    // 1. Check if employee already has an open active vault session
+private handleSuccessfulLogin(employee: Employee): void {
+    // Check ONLY for currently OPEN vaults belonging to this employee
     const activeVaults = this.posService.activeVaultSessions?.() || [];
     const cleanPin = (employee.pinCode || employee.pin || '').trim();
+
     const hasOpenVault = activeVaults.some(
-      v => (v.waiterId === employee.id || v.waiterId === cleanPin || v.waiterName === employee.name) && v.status === 'OPEN'
+      v => v.status === 'OPEN' && (v.waiterId === employee.id || v.waiterId === cleanPin)
     );
 
-    // 2. If they already have an active shift/vault, go straight in
     if (hasOpenVault) {
       this.autoLogoutService.startMonitoring();
       this.redirectByRole(employee.role);
     } else {
-      // 3. Otherwise, show the Starting Float / Shift Setup screen
-      this.startingFloat = 50; // Default preset to €50.00
+      // Prompt for starting float
+      this.startingFloat = 50;
       this.step.set('SHIFT_SETUP');
     }
   }
 
-  public cancelShiftSetup(): void {
-    this.autoLogoutService.stopMonitoring();
-    this.posService.logoutEmployee();
-    this.enteredPin.set('');
-    this.step.set('PIN_ENTRY');
-  }
-
-  public startShiftAndVault(selectedEmp?: Employee): void {
+  public async startShiftAndVault(selectedEmp?: Employee): Promise<void> {
     const floatAmount = Number(this.startingFloat) >= 0 ? Number(this.startingFloat) : 0;
-    
     const emp = selectedEmp || this.posService.currentEmployee();
-    
-    if (emp) {
-      this.posService.setLoggedInEmployee(emp, floatAmount);
-      // 👈 Start monitoring when shift is initiated
-      this.autoLogoutService.startMonitoring();
-      this.redirectByRole(emp.role);
-    } else {
-      this.router.navigate(['/floor-plan'], { replaceUrl: true });
+
+    if (!emp) {
+      this.step.set('PIN_ENTRY');
+      return;
     }
+
+    // 1. Set current employee with starting float in POS service
+    await this.posService.setLoggedInEmployee(emp, floatAmount);
+
+    // 2. Start global auto-logout idle timer
+    this.autoLogoutService.startMonitoring();
+
+    // 3. Navigate to floor plan
+    this.redirectByRole(emp.role);
   }
 
   private redirectByRole(role?: string): void {
@@ -180,5 +177,22 @@ public async submitPin(): Promise<void> {
     } else {
       this.router.navigate(['/floor-plan'], { replaceUrl: true });
     }
+  }
+  // src/app/features/waiter-login/waiter-login.component.ts
+
+  public cancelShiftSetup(): void {
+    // 1. Stop any running idle monitor
+    this.autoLogoutService.stopMonitoring();
+
+    // 2. Clear current employee state in POS service
+    this.posService.logoutEmployee();
+
+    // 3. Reset input states
+    this.enteredPin.set('');
+    this.errorMessage.set('');
+    this.startingFloat = 0;
+
+    // 4. Return to PIN pad screen
+    this.step.set('PIN_ENTRY');
   }
 }
