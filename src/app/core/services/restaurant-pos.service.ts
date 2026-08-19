@@ -332,20 +332,19 @@ export class RestaurantPosService {
     ];
 
     const starterProducts: Product[] = [
-      { id: `${storeId}_prod_1`, name: 'Espresso', price: 1.80, categoryId: `${storeId}_cat_coffee`, taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_2`, name: 'Espresso Double', price: 2.20, categoryId: `${storeId}_cat_coffee`, taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_3`, name: 'Freddo Espresso', price: 2.30, categoryId: `${storeId}_cat_coffee`, taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_4`, name: 'Cappuccino', price: 2.50, categoryId: `${storeId}_cat_coffee`, taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_5`, name: 'Freddo Cappuccino', price: 2.70, categoryId: `${storeId}_cat_coffee`, taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_6`, name: 'Ελληνικός Διπλός', price: 2.00, categoryId: `${storeId}_cat_coffee`, taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_7`, name: 'Φυσικός Χυμός Πορτοκάλι', price: 3.50, categoryId: `${storeId}_cat_drinks`, taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_8`, name: 'Τοστ Γαλοπούλα - Κασέρι', price: 2.80, categoryId: `${storeId}_cat_food`, taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_9`, name: 'Club Sandwich Classic', price: 6.50, categoryId: `${storeId}_cat_food`, taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_10`, name: 'Μπύρα Alfa 330ml', price: 3.50, categoryId: `${storeId}_cat_bar`, taxRate: 24, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_11`, name: 'Aperol Spritz', price: 7.00, categoryId: `${storeId}_cat_bar`, taxRate: 24, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_12`, name: 'Νερό 500ml', price: 0.50, categoryId: `${storeId}_cat_drinks`, taxRate: 13, isActive: true, tenantId, storeId }
+      { id: `${storeId}_prod_1`, name: 'Espresso', price: 1.80, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+{ id: `${storeId}_prod_2`, name: 'Espresso Double', price: 2.20, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+{ id: `${storeId}_prod_3`, name: 'Freddo Espresso', price: 2.20, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+{ id: `${storeId}_prod_4`, name: 'Cappuccino', price: 2.50, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+{ id: `${storeId}_prod_5`, name: 'Freddo Cappuccino', price: 2.50, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+{ id: `${storeId}_prod_6`, name: 'Ελληνικός Διπλός', price: 2.00, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+{ id: `${storeId}_prod_7`, name: 'Φυσικός Χυμός Πορτοκάλι', price: 3.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+{ id: `${storeId}_prod_8`, name: 'Τοστ Γαλοπούλα Τυρί', price: 2.50, categoryId: 'cat_food', station: 'KITCHEN', taxRate: 13, isActive: true, tenantId, storeId },
+{ id: `${storeId}_prod_9`, name: 'Club Sandwich Classic', price: 6.50, categoryId: 'cat_food', station: 'KITCHEN', taxRate: 13, isActive: true, tenantId, storeId },
+{ id: `${storeId}_prod_10`, name: 'Μπύρα Alfa 330ml', price: 3.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 24, isActive: true, tenantId, storeId },
+{ id: `${storeId}_prod_11`, name: 'Aperol Spritz', price: 7.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 24, isActive: true, tenantId, storeId },
+{ id: `${storeId}_prod_12`, name: 'Νερό 500ml', price: 0.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
     ];
-
     if ((this.inventoryService as any).categories) {
       (this.inventoryService as any).categories.set(starterCategories);
     }
