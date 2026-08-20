@@ -90,28 +90,46 @@ export class WaiterLoginComponent implements OnInit {
       this.enteredPin.set('');
     }
   }
+      private isKitchenOrBarRole(role?: string): boolean {
+  const r = (role || '').toUpperCase();
+  return r === 'KITCHEN' || r === 'CHEF' || r === 'BAR' || r === 'BARISTA' || r === 'BARMAN';
+}
 
-  private handleSuccessfulAuth(employee: Employee): void {
-    const activeVaults = this.posService.activeVaultSessions() || [];
-    const cleanPin = (employee.pinCode || employee.pin || '').trim();
-
-    // Check if employee ALREADY has an active OPEN vault session
-    const existingVault = activeVaults.find(
-      v => v.status === 'OPEN' && (v.waiterId === employee.id || v.waiterId === cleanPin || v.waiterName === employee.name)
-    );
-
-    if (existingVault) {
-      // Already has an active open vault: Log in directly without re-prompting float
-      this.posService.setLoggedInEmployee(employee, existingVault.startingFloat);
-      this.autoLogoutService.startMonitoring();
-      this.redirectByRole(employee.role);
-    } else {
-      // New shift: Prompt for starting float
-      this.pendingEmployee.set(employee);
-      this.startingFloat = 50;
-      this.step.set('SHIFT_SETUP');
-    }
+ private handleSuccessfulAuth(employee: Employee): void {
+  // 1. Kitchen & Bar Staff -> Skip float setup completely, go straight to KDS
+  if (this.isKitchenOrBarRole(employee.role)) {
+    this.posService.setLoggedInEmployee(employee, 0);
+    this.redirectByRole(employee.role);
+    return;
   }
+
+  // 2. Check if Waiter / Floor staff already has an OPEN vault
+  const activeVaults = this.posService.activeVaultSessions() || [];
+  const cleanPin = (employee.pinCode || employee.pin || '').trim();
+
+  const existingVault = activeVaults.find(
+    v => v.status === 'OPEN' && (v.waiterId === employee.id || v.waiterId === cleanPin || v.waiterName === employee.name)
+  );
+
+  if (existingVault) {
+    // Already has an active open vault: Log in directly without re-prompting float
+    this.posService.setLoggedInEmployee(employee, existingVault.startingFloat);
+    this.redirectByRole(employee.role);
+  } else {
+    // Waiter starting a fresh shift -> Show float selection modal (€20, €30, €50)
+    this.pendingEmployee.set(employee);
+    this.startingFloat = 50;
+    this.step.set('SHIFT_SETUP');
+  }
+}
+
+private redirectByRole(role?: string): void {
+  if (this.isKitchenOrBarRole(role)) {
+    this.router.navigate(['/kitchen'], { replaceUrl: true });
+  } else {
+    this.router.navigate(['/floor-plan'], { replaceUrl: true });
+  }
+}
 
   public async startShiftAndVault(): Promise<void> {
     const emp = this.pendingEmployee() || this.posService.currentEmployee();
@@ -134,15 +152,6 @@ export class WaiterLoginComponent implements OnInit {
     this.enteredPin.set('');
     this.errorMessage.set('');
     this.step.set('PIN_ENTRY');
-  }
-
-  private redirectByRole(role?: string): void {
-    const r = (role || '').toUpperCase();
-    if (r === 'KITCHEN' || r === 'CHEF' || r === 'BAR' || r === 'BARISTA') {
-      this.router.navigate(['/kitchen'], { replaceUrl: true });
-    } else {
-      this.router.navigate(['/floor-plan'], { replaceUrl: true });
-    }
   }
 
   public async submitActivationKey(): Promise<void> {

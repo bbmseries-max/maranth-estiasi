@@ -1021,21 +1021,18 @@ public logoutEmployee(): void {
     // 5. Hard logout if active user closed their own shift (reuses currentEmp from line 2)
     if (currentEmp) {
       const currentEmp = this.currentEmployee();
-    if (currentEmp) {
-      const curId = String(currentEmp.id || '').trim().toLowerCase();
-      const curName = String(currentEmp.name || '').trim().toLowerCase();
-      const curPin = String(currentEmp.pin || currentEmp.pinCode || '').trim().toLowerCase();
+if (currentEmp) {
+  const currentEmpId = String(currentEmp.id || '').trim().toLowerCase();
+  const currentEmpPin = String(currentEmp.pin || currentEmp.pinCode || '').trim().toLowerCase();
 
-      const vaultWaiterId = String(closedSession.waiterId || '').trim().toLowerCase();
-      const vaultWaiterName = String(closedSession.waiterName || '').trim().toLowerCase();
+  const vaultWaiterId = String(closedSession.waiterId || '').trim().toLowerCase();
 
-      const isSelf = 
-        (vaultWaiterId && (vaultWaiterId === curId || vaultWaiterId === curPin)) ||
-        (vaultWaiterName && vaultWaiterName === curName) ||
-        (curId && vaultWaiterId.includes(curId));
+  // Strict check: Only logout if the vault actually belongs to the active logged-in employee
+  const isClosingOwnVault = 
+    (vaultWaiterId && (vaultWaiterId === currentEmpId || vaultWaiterId === currentEmpPin));
 
-      if (isSelf) {
-        this.logoutEmployee();
+  if (isClosingOwnVault) {
+    this.logoutEmployee();
       }
     }
   }
