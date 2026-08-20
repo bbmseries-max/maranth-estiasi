@@ -78,7 +78,7 @@ export class RestaurantPosService {
   private salesUnsub: Unsubscribe | null = null;
   private zReportsUnsub: Unsubscribe | null = null;
   private auditLogsUnsub: Unsubscribe | null = null;
-  private isInitialized = false;
+  private isInitialVaultsSync = true;
 
   // Sub-Services Injection
   public inventoryService = inject(InventoryService);
@@ -299,7 +299,6 @@ export class RestaurantPosService {
       this.tableOrderService.initFirestoreSync(this.db, () => this.currentEmployee());
       this.initVaultsSync();
       this.initFinancialListeners();
-      this.isInitialized = true;
     } catch (e) {
       console.error('Firebase initialization error:', e);
     }
@@ -312,7 +311,6 @@ export class RestaurantPosService {
     this.tableOrderService.initFirestoreSync(this.db, () => emp || this.currentEmployee());
     this.initVaultsSync();
     this.initFinancialListeners();
-    this.isInitialized = true;
   }
 
   public getActiveTenantAndStore(): { tenantId: string; storeId: string } {
@@ -334,17 +332,17 @@ export class RestaurantPosService {
 
     const starterProducts: Product[] = [
       { id: `${storeId}_prod_1`, name: 'Espresso', price: 1.80, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-{ id: `${storeId}_prod_2`, name: 'Espresso Double', price: 2.20, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-{ id: `${storeId}_prod_3`, name: 'Freddo Espresso', price: 2.20, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-{ id: `${storeId}_prod_4`, name: 'Cappuccino', price: 2.50, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-{ id: `${storeId}_prod_5`, name: 'Freddo Cappuccino', price: 2.50, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-{ id: `${storeId}_prod_6`, name: 'Ελληνικός Διπλός', price: 2.00, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-{ id: `${storeId}_prod_7`, name: 'Φυσικός Χυμός Πορτοκάλι', price: 3.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-{ id: `${storeId}_prod_8`, name: 'Τοστ Γαλοπούλα Τυρί', price: 2.50, categoryId: 'cat_food', station: 'KITCHEN', taxRate: 13, isActive: true, tenantId, storeId },
-{ id: `${storeId}_prod_9`, name: 'Club Sandwich Classic', price: 6.50, categoryId: 'cat_food', station: 'KITCHEN', taxRate: 13, isActive: true, tenantId, storeId },
-{ id: `${storeId}_prod_10`, name: 'Μπύρα Alfa 330ml', price: 3.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 24, isActive: true, tenantId, storeId },
-{ id: `${storeId}_prod_11`, name: 'Aperol Spritz', price: 7.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 24, isActive: true, tenantId, storeId },
-{ id: `${storeId}_prod_12`, name: 'Νερό 500ml', price: 0.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_2`, name: 'Espresso Double', price: 2.20, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_3`, name: 'Freddo Espresso', price: 2.20, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_4`, name: 'Cappuccino', price: 2.50, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_5`, name: 'Freddo Cappuccino', price: 2.50, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_6`, name: 'Ελληνικός Διπλός', price: 2.00, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_7`, name: 'Φυσικός Χυμός Πορτοκάλι', price: 3.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_8`, name: 'Τοστ Γαλοπούλα Τυρί', price: 2.50, categoryId: 'cat_food', station: 'KITCHEN', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_9`, name: 'Club Sandwich Classic', price: 6.50, categoryId: 'cat_food', station: 'KITCHEN', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_10`, name: 'Μπύρα Alfa 330ml', price: 3.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 24, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_11`, name: 'Aperol Spritz', price: 7.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 24, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_12`, name: 'Νερό 500ml', price: 0.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
     ];
     if ((this.inventoryService as any).categories) {
       (this.inventoryService as any).categories.set(starterCategories);
@@ -377,7 +375,7 @@ export class RestaurantPosService {
 
   // 2. 1-tap Toggle method for Admin/Manager
   public toggleProductPinned(productId: string): void {
-    this.products.update(list =>
+    this.products.update(list => 
       list.map(prod => 
         prod.id === productId ? { ...prod, isPinnedToPOS: !prod.isPinnedToPOS } : prod
       )
@@ -388,8 +386,7 @@ export class RestaurantPosService {
   public async loginWithPin(pin: string): Promise<Employee | null> {
     const result: any = await this.authShiftService.loginWithPin(pin);
     const emp: Employee | null = result?.employee || (result?.id ? result : null);
-    
-      return emp;
+    return emp;
   }
 
   public setLoggedInEmployee(emp: Employee, customFloat: number = 0): void {
@@ -411,7 +408,7 @@ export class RestaurantPosService {
       v => (
         v.waiterId === emp.id || 
         v.waiterId === cleanPin || 
-        v.waiterName === emp.name ||
+        v.waiterName === emp.name || 
         (v.waiterId && cleanPin && v.waiterId.includes(cleanPin))
       ) && v.status === 'OPEN'
     );
@@ -423,20 +420,21 @@ export class RestaurantPosService {
     }
   }
 
-public logoutEmployee(): void {
-    // 1. Clear credentials from storage
+  public logoutEmployee(): void {
+    // 1. Clear all local storage & session tokens
     localStorage.removeItem('current_employee');
     localStorage.removeItem('maranth_pos_employee');
     sessionStorage.removeItem('current_employee');
     sessionStorage.clear();
 
-    // 2. Reset in-memory signals
-    this.authShiftService.currentEmployee.set(null);
-    this.authShiftService.activeWorkShift.set(null);
-    this.activeVaultSession.set(null);
+    // 2. Run inside NgZone to force Angular to update the route immediately
+    this.ngZone.run(() => {
+      this.authShiftService.currentEmployee.set(null);
+      this.authShiftService.activeWorkShift.set(null);
+      this.activeVaultSession.set(null);
 
-    // 3. Navigate back to login
-    this.router.navigate(['/login'], { replaceUrl: true });
+      this.router.navigate(['/login'], { replaceUrl: true });
+    });
   }
 
   public clockInShift(notes?: string): void {
@@ -548,7 +546,6 @@ public logoutEmployee(): void {
       this.zReports.set(list);
     }, (err) => console.warn('Z-Reports listener:', err));
 
-    // 3. Sync Audit Logs
     // 3. Sync Audit Logs (Limited to 100 most recent)
     const auditQuery = query(
       collection(this.db, 'auditLogs'),
@@ -575,9 +572,7 @@ public logoutEmployee(): void {
         this.auditLogs.set(list.slice(0, 100));
       },
       (err) => {
-        // Fallback in case Firestore composite index on (tenantId + timestamp) is pending creation
         console.warn('Audit logs compound query warning, falling back to base collection:', err);
-        
         const fallbackQuery = query(collection(this.db, 'auditLogs'), limit(100));
         this.auditLogsUnsub = onSnapshot(fallbackQuery, (fallbackSnap) => {
           const fallbackList: AuditLog[] = [];
@@ -846,9 +841,24 @@ public logoutEmployee(): void {
           v.waiterName?.toLowerCase() === empName || 
           (v.waiterId && cleanPin && v.waiterId.includes(cleanPin))
         );
+
         this.activeVaultSession.set(myActiveVault || null);
+
+        // 🚨 REMOTE KICK-OUT GUARD:
+        const role = (emp.role || '').toUpperCase();
+        const isFloorStaff = role === 'WAITER';
+
+        if (isFloorStaff && !myActiveVault && !this.isInitialVaultsSync) {
+          console.warn(`🔒 Active vault for ${emp.name} was closed. Logging out device...`);
+          this.logoutEmployee();
+        }
       } else {
         this.activeVaultSession.set(null);
+      }
+
+      // Mark initial load as completed
+      if (this.isInitialVaultsSync) {
+        this.isInitialVaultsSync = false;
       }
     }, (err) => console.warn('Vaults listener error:', err));
   }
@@ -866,7 +876,7 @@ public logoutEmployee(): void {
       v => (
         v.waiterId === emp.id || 
         v.waiterId === cleanPin || 
-        v.waiterName === emp.name ||
+        v.waiterName === emp.name || 
         (v.waiterId && cleanPin && v.waiterId.includes(cleanPin))
       ) && v.status === 'OPEN'
     );
@@ -1018,25 +1028,21 @@ public logoutEmployee(): void {
       `Κλείσιμο ταμείου (${closedSession.waiterName}): Μετρητά €${cash.toFixed(2)}, Κάρτες €${card.toFixed(2)}. Παράδοση: €${handedOver.toFixed(2)}`
     );
 
-    // 5. Hard logout if active user closed their own shift (reuses currentEmp from line 2)
+    // 5. Hard logout if active user closed their own shift
     if (currentEmp) {
-      const currentEmp = this.currentEmployee();
-if (currentEmp) {
-  const currentEmpId = String(currentEmp.id || '').trim().toLowerCase();
-  const currentEmpPin = String(currentEmp.pin || currentEmp.pinCode || '').trim().toLowerCase();
+      const currentEmpId = String(currentEmp.id || '').trim().toLowerCase();
+      const currentEmpPin = String(currentEmp.pin || currentEmp.pinCode || '').trim().toLowerCase();
+      const vaultWaiterId = String(closedSession.waiterId || '').trim().toLowerCase();
 
-  const vaultWaiterId = String(closedSession.waiterId || '').trim().toLowerCase();
+      const isClosingOwnVault = 
+        (vaultWaiterId && (vaultWaiterId === currentEmpId || vaultWaiterId === currentEmpPin));
 
-  // Strict check: Only logout if the vault actually belongs to the active logged-in employee
-  const isClosingOwnVault = 
-    (vaultWaiterId && (vaultWaiterId === currentEmpId || vaultWaiterId === currentEmpPin));
-
-  if (isClosingOwnVault) {
-    this.logoutEmployee();
+      if (isClosingOwnVault) {
+        this.logoutEmployee();
       }
     }
   }
-  }
+
   public closeDayAndGenerateZReport(): DailyZReportSnapshot {
     const emp = this.currentEmployee();
     const { tenantId, storeId } = this.getActiveTenantAndStore();
@@ -1112,7 +1118,6 @@ if (currentEmp) {
     const emp = this.currentEmployee();
     const { tenantId, storeId } = this.getActiveTenantAndStore();
 
-    // 🔒 Safely resolve table identifier (handles "A1", 5, Table object, or undefined)
     let resolvedTableNumber: string | number | undefined = undefined;
     if (typeof tableContext === 'string' || typeof tableContext === 'number') {
       resolvedTableNumber = tableContext;

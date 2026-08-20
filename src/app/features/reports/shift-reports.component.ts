@@ -222,6 +222,7 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
     );
 
     if (employeeVault) {
+      // 1. Direct user to count cash before closing
       this.openCloseVaultModal(employeeVault);
       return;
     }
@@ -234,6 +235,7 @@ export class ShiftReportsComponent implements OnInit, OnDestroy {
       await this.authShiftService.clockOutEmployeeShift(emp.id, `Χειροκίνητο κλείσιμο βάρδιας (${emp.name})`);
       
       const current = this.posService.currentEmployee();
+      // If closing self -> logout; if closing someone else -> stay on screen
       if (current && (current.id === emp.id || current.name === emp.name)) {
         this.posService.logoutEmployee();
       } else {
