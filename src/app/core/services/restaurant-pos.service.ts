@@ -505,8 +505,11 @@ export class RestaurantPosService {
     if (this.zReportsUnsub) this.zReportsUnsub();
     if (this.auditLogsUnsub) this.auditLogsUnsub();
 
-    const targetTenant = normalizeKey(this.activeTenantId());
-    const targetStore = normalizeKey(this.activeStoreId());
+    const rawTenantId = this.activeTenantId();
+    const rawStoreId = this.activeStoreId();
+
+    const targetTenant = normalizeKey(rawTenantId);
+    const targetStore = normalizeKey(rawStoreId);
 
     // 1. Sync Sales History
     this.salesUnsub = onSnapshot(collection(this.db, 'sales'), (snap) => {
@@ -516,8 +519,8 @@ export class RestaurantPosService {
         const dTenant = normalizeKey(data.tenantId);
         const dStore = normalizeKey(data.storeId);
 
-        const matchTenant = !dTenant || dTenant === targetTenant;
-        const matchStore = !dStore || dStore === targetStore || dStore === 'all';
+        const matchTenant = dTenant === targetTenant;
+        const matchStore = dStore === targetStore;
 
         if (matchTenant && matchStore) {
           list.push({ ...data, id: d.id });
@@ -535,8 +538,8 @@ export class RestaurantPosService {
         const dTenant = normalizeKey(data.tenantId);
         const dStore = normalizeKey(data.storeId);
 
-        const matchTenant = !dTenant || dTenant === targetTenant;
-        const matchStore = !dStore || dStore === targetStore || dStore === 'all';
+        const matchTenant = dTenant === targetTenant;
+        const matchStore = dStore === targetStore;
 
         if (matchTenant && matchStore) {
           list.push({ ...data, id: d.id });
@@ -546,10 +549,11 @@ export class RestaurantPosService {
       this.zReports.set(list);
     }, (err) => console.warn('Z-Reports listener:', err));
 
-    // 3. Sync Audit Logs (Limited to 100 most recent)
+    // 3. Sync Audit Logs (Filtered strictly by tenantId AND storeId)
     const auditQuery = query(
       collection(this.db, 'auditLogs'),
-      where('tenantId', '==', targetTenant),
+      where('tenantId', '==', rawTenantId),
+      where('storeId', '==', rawStoreId),
       orderBy('timestamp', 'desc'),
       limit(100)
     );
@@ -560,20 +564,20 @@ export class RestaurantPosService {
         const list: AuditLog[] = [];
         snap.forEach(d => {
           const data = d.data() as AuditLog;
-          const dStore = normalizeKey(data.storeId);
-          const matchStore = !dStore || dStore === targetStore || dStore === 'all';
-
-          if (matchStore) {
-            list.push({ ...data, id: d.id });
-          }
+          list.push({ ...data, id: d.id });
         });
         
         list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        this.auditLogs.set(list.slice(0, 100));
+        this.auditLogs.set(list);
       },
       (err) => {
-        console.warn('Audit logs compound query warning, falling back to base collection:', err);
-        const fallbackQuery = query(collection(this.db, 'auditLogs'), limit(100));
+        console.warn('Audit logs compound index pending, applying client-side strict filter:', err);
+        // Fallback without Firestore composite index requirement
+        const fallbackQuery = query(
+          collection(this.db, 'auditLogs'),
+          limit(300)
+        );
+
         this.auditLogsUnsub = onSnapshot(fallbackQuery, (fallbackSnap) => {
           const fallbackList: AuditLog[] = [];
           fallbackSnap.forEach(d => {
@@ -581,8 +585,9 @@ export class RestaurantPosService {
             const dTenant = normalizeKey(data.tenantId);
             const dStore = normalizeKey(data.storeId);
 
-            const matchTenant = !dTenant || dTenant === targetTenant;
-            const matchStore = !dStore || dStore === targetStore || dStore === 'all';
+            // Strict matching: do NOT accept empty or 'all' across unrelated stores
+            const matchTenant = dTenant === targetTenant;
+            const matchStore = dStore === targetStore;
 
             if (matchTenant && matchStore) {
               fallbackList.push({ ...data, id: d.id });
@@ -1118,6 +1123,9 @@ export class RestaurantPosService {
     const emp = this.currentEmployee();
     const { tenantId, storeId } = this.getActiveTenantAndStore();
 
+    const resolvedTenant = emp?.tenantId || tenantId;
+    const resolvedStore = emp?.storeId || storeId;
+
     let resolvedTableNumber: string | number | undefined = undefined;
     if (typeof tableContext === 'string' || typeof tableContext === 'number') {
       resolvedTableNumber = tableContext;
@@ -1130,9 +1138,9 @@ export class RestaurantPosService {
     }
 
     const newLog: AuditLog = {
-      id: `AUDIT-${Date.now()}`,
-      tenantId: emp?.tenantId || tenantId,
-      storeId: emp?.storeId || storeId,
+      id: `AUDIT-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      tenantId: resolvedTenant,
+      storeId: resolvedStore,
       timestamp: new Date().toISOString(),
       employeeId: emp?.id || 'SYSTEM',
       employeeName: emp?.name || 'Σύστημα',
@@ -1141,9 +1149,21 @@ export class RestaurantPosService {
       details
     };
 
-    this.auditLogs.set([newLog, ...this.auditLogs()]);
+    // Only add to local signal if it strictly belongs to this tenant and store
+    const currentTargetTenant = normalizeKey(this.activeTenantId());
+    const currentTargetStore = normalizeKey(this.activeStoreId());
+
+    if (
+      normalizeKey(newLog.tenantId) === currentTargetTenant &&
+      normalizeKey(newLog.storeId) === currentTargetStore
+    ) {
+      this.auditLogs.set([newLog, ...this.auditLogs()]);
+    }
+
     if (this.db) {
-      setDoc(doc(this.db, 'auditLogs', newLog.id), cleanUndefined(newLog)).catch(() => {});
+      setDoc(doc(this.db, 'auditLogs', newLog.id), cleanUndefined(newLog)).catch((err) => {
+        console.error('Error writing audit log:', err);
+      });
     }
   }
 

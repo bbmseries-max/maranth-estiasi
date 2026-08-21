@@ -49,7 +49,7 @@ export class DevicePairingService {
       storeIcon: '🍷',
       city: 'Αθήνα',
       status: 'ACTIVE'
-    }
+    },
   };
 
   // Signals
