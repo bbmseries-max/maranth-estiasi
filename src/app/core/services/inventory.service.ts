@@ -22,6 +22,7 @@ import {
   Category, 
   Product, 
   ModifierGroup, 
+  ModifierOption,
   SpoilageLog, 
   Employee 
 } from '../modals';
@@ -218,6 +219,72 @@ export class InventoryService {
 
     if (this.db) {
       setDoc(doc(this.db, 'rawMaterials', id), cleanUndefined(updatedMat), { merge: true }).catch(() => {});
+    }
+  }
+
+  // 1. Add new Modifier Group for this tenant
+  public async addModifierGroup(groupData: {
+    name: string;
+    required: boolean;
+    minSelections: number;
+    maxSelections: number;
+    options: ModifierOption[];
+  }): Promise<{ success: boolean; group?: ModifierGroup }> {
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+    if (!this.db) return { success: false };
+
+    const newGroup: ModifierGroup = {
+      id: `${storeId}_modgrp_${Date.now()}`,
+      tenantId,
+      storeId,
+      name: groupData.name.trim(),
+      required: groupData.required,
+      minSelect: groupData.minSelections,
+      maxSelect: groupData.maxSelections,
+      minSelections: groupData.minSelections,
+      maxSelections: groupData.maxSelections,
+      options: groupData.options.map((opt, idx) => ({
+        ...opt,
+        id: opt.id || `${storeId}_opt_${Date.now()}_${idx}`,
+        tenantId,
+        storeId,
+        available: opt.available ?? true,
+        priceExtra: Number(opt.priceExtra) || 0
+      }))
+    };
+
+    try {
+      await setDoc(doc(this.db, 'modifier_groups', newGroup.id), cleanUndefined(newGroup));
+      return { success: true, group: newGroup };
+    } catch (err) {
+      console.error('[InventoryService] Error adding modifier group:', err);
+      return { success: false };
+    }
+  }
+
+  // 2. Update existing Modifier Group (e.g. changing prices or adding an extra option)
+  public async updateModifierGroup(groupId: string, data: Partial<ModifierGroup>): Promise<void> {
+    if (!this.db) return;
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+
+    try {
+      await setDoc(
+        doc(this.db, 'modifier_groups', groupId),
+        cleanUndefined({ ...data, tenantId, storeId }),
+        { merge: true }
+      );
+    } catch (err) {
+      console.error('[InventoryService] Error updating modifier group:', err);
+    }
+  }
+
+  // 3. Delete Modifier Group
+  public async deleteModifierGroup(groupId: string): Promise<void> {
+    if (!this.db) return;
+    try {
+      await deleteDoc(doc(this.db, 'modifier_groups', groupId));
+    } catch (err) {
+      console.error('[InventoryService] Error deleting modifier group:', err);
     }
   }
 

@@ -1,6 +1,7 @@
 // src/app/app.routes.ts
 
 import { Routes } from '@angular/router';
+import { pendingOrderGuard } from './core/guards/pending-order.guard';
 import { roleGuard } from './core/guards/role.guard';
 import { tenantExistsGuard } from './core/guards/tenant.guard';
 
@@ -33,6 +34,7 @@ export const routes: Routes = [
   {
     path: 't/:tenantSlug/order/:tableId',
     canActivate: [tenantExistsGuard, roleGuard],
+    canDeactivate: [pendingOrderGuard],
     loadComponent: () => import('./features/pos/order-terminal.component')
       .then(m => m.OrderTerminalComponent),
     data: { roles: ['MANAGER', 'BARISTA', 'ADMIN', 'OWNER', 'WAITER', 'HEAD_WAITER'] },

@@ -1,12 +1,29 @@
 // src/app/core/services/thermal-printer.service.ts
 
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { DailyZReportSnapshot, WaiterVaultSession } from '../modals/restaurant-pos.modals';
+import { TenantContextService } from './tenant-context.service';
 
 @Injectable({
   providedIn: 'root'
 })
 export class ThermalPrinterService {
+  private tenantContext = inject(TenantContextService);
+
+  private getStoreHeaderHtml(subtitle: string = 'Καφέ - Εστιατόριο - Bar'): string {
+    const store = this.tenantContext.activeStore();
+    const name = store?.name || 'Maranth Estiasi';
+    const icon = store?.icon || '☕';
+    const city = store?.city ? ` - ${store.city}` : '';
+
+    return `
+      <div class="text-center">
+        <div class="header-title">${icon} ${name.toUpperCase()}</div>
+        <div style="font-size: 11px; font-weight: bold; margin-top: 2px;">${subtitle}</div>
+        <div style="font-size: 10px; color: #555;">${city}</div>
+      </div>
+    `;
+  }
 
   /**
    * Prints 80mm Waiter Vault Handover Receipt
@@ -45,11 +62,7 @@ export class ThermalPrinterService {
           </style>
         </head>
         <body>
-          <div class="text-center">
-            <div class="header-title">🍊 MARANTH ESTIASI</div>
-            <div>ΔΕΛΤΙΟ ΠΑΡΑΔΟΣΗΣ ΤΑΜΕΙΟΥ</div>
-            <div>Καφέ - Εστιατόριο - Bar</div>
-          </div>
+          ${this.getStoreHeaderHtml('ΔΕΛΤΙΟ ΠΑΡΑΔΟΣΗΣ ΤΑΜΕΙΟΥ')}
           <div class="divider"></div>
           <div><strong>Σερβιτόρος:</strong> ${vault.waiterName}</div>
           <div><strong>Έναρξη:</strong> ${new Date(vault.openedAt).toLocaleString('el-GR')}</div>
@@ -132,11 +145,7 @@ export class ThermalPrinterService {
           </style>
         </head>
         <body>
-          <div class="text-center">
-            <div class="header-title">🍊 MARANTH ESTIASI</div>
-            <div>ΗΜΕΡΗΣΙΑ ΑΝΑΦΟΡΑ Z-REPORT</div>
-            <div>Καφέ - Εστιατόριο - Bar</div>
-          </div>
+          ${this.getStoreHeaderHtml('ΗΜΕΡΗΣΙΑ ΑΝΑΦΟΡΑ Z-REPORT')}
           <div class="divider"></div>
           <div><strong>Ημερομηνία:</strong> ${z.dateStr}</div>
           <div><strong>Έκδοση:</strong> ${new Date(z.timestamp).toLocaleString('el-GR')}</div>
@@ -266,11 +275,7 @@ export class ThermalPrinterService {
           </style>
         </head>
         <body>
-          <div class="text-center">
-            <div class="header-title">🍊 MARANTH ESTIASI</div>
-            <div>ΠΡΟΛΟΓΑΡΙΑΣΜΟΣ / ΕΝΗΜΕΡΩΤΙΚΟ</div>
-            <div>Καφέ - Εστιατόριο - Bar</div>
-          </div>
+          ${this.getStoreHeaderHtml('ΠΡΟΛΟΓΑΡΙΑΣΜΟΣ / ΕΝΗΜΕΡΩΤΙΚΟ')}
           <div class="divider"></div>
           <div><strong>ΤΡΑΠΕΖΙ:</strong> #${tableNumber} (${tableName})</div>
           <div><strong>Σερβιτόρος:</strong> ${waiterName}</div>

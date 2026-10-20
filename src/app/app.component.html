@@ -106,6 +106,14 @@
     }
   }
 
+  <!-- OFFLINE WARNING BANNER -->
+@if (!connectionService.isOnline()) {
+  <div class="bg-red-600 text-white px-4 py-2 text-xs font-black flex items-center justify-center gap-2 shadow-lg sticky top-0 z-[100] animate-pulse">
+    <span>⚠️</span>
+    <span>ΧΩΡΙΣ ΣΥΝΔΕΣΗ INTERNET (OFFLINE) — Οι παραγγελίες και οι εκτυπώσεις δεν θα σταλούν μέχρι να επανέλθει το δίκτυο!</span>
+  </div>
+}
+
 <main class="flex-1 w-full flex flex-col">
     <router-outlet></router-outlet>
   </main>

@@ -5,6 +5,7 @@ import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
 import { ThermalPrinterService } from '../../core/services/thermal-printer.service';
 import { TenantContextService } from '../../core/services/tenant-context.service';
+import { ConnectionStatusService } from '../../core/services/connection-status.service';
 import { 
   RestaurantTable, 
   TableOrderItem, 
@@ -31,6 +32,7 @@ export class OrderTerminalComponent implements OnInit {
   private ngZone = inject(NgZone);
   public tenantContext = inject(TenantContextService);
   public posService = inject(RestaurantPosService);
+  private connectionService = inject(ConnectionStatusService);
 
   public Math = Math;
 
@@ -394,6 +396,12 @@ export class OrderTerminalComponent implements OnInit {
   public async sendOrder(): Promise<void> {
     const tableId = this.activeTableId();
     if (!tableId || this.isProcessing()) return;
+
+    // 🛡️ Guard against offline kitchen dispatch
+    if (!this.connectionService.isOnline()) {
+      alert('⛔ Αδυναμία αποστολής: Η συσκευή είναι εκτός σύνδεσης (Offline). Ελέγξτε το Wi-Fi.');
+      return;
+    }
 
     this.isProcessing.set(true);
     try {

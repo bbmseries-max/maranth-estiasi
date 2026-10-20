@@ -6,6 +6,7 @@ import { MenuSeederService } from './core/services/menu-seeder.service';
 import { AutoLogoutService } from './core/services/auto-logout.service';
 import { RestaurantPosService } from './core/services/restaurant-pos.service';
 import { AuthShiftService } from './core/services/auth-shift.service';
+import { ConnectionStatusService } from './core/services/connection-status.service';
 
 @Component({
   selector: 'app-root',
@@ -18,6 +19,7 @@ export class AppComponent implements OnInit {
   private seeder = inject(MenuSeederService);
   private router = inject(Router);
   public tenantContext = inject(TenantContextService);
+  public connectionService = inject(ConnectionStatusService);
 
   public posService = inject(RestaurantPosService);
   public authShiftService = inject(AuthShiftService);

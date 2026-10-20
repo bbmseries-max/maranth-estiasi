@@ -10,7 +10,8 @@ import {
   query,
   where,
   Timestamp,
-  Unsubscribe
+  Unsubscribe,
+  runTransaction
 } from 'firebase/firestore';
 import { TenantContextService } from './tenant-context.service';
 
@@ -713,23 +714,9 @@ export class TableOrderService {
     currentEmp: Employee | null, 
     onPaymentSuccessFn?: (saleRecord: SaleRecord) => void
   ): Promise<void> {
-    const table = this.tables().find(t => t.id === tableId);
-    if (!table) return;
-
-    if (table.activeOrder && table.activeOrder.items) {
-      const unsentItems = table.activeOrder.items.filter(item => item.status === 'PENDING');
-      if (unsentItems.length > 0) {
-        alert(
-          `⚠️ Υπάρχουν ${unsentItems.length} εκκρεμή προϊόντα που δεν έχουν σταλεί στην κουζίνα!\n\nΠαρακαλώ πατήστε "Αποστολή" στην κουζίνα πριν την εξόφληση.`
-        );
-        return;
-      }
-    }
+    if (!this.db) return;
 
     const { tenantId, storeId } = this.getActiveTenantAndStore();
-    const grandTotal = Number(table.activeOrder?.grandTotal || table.currentTotal || 0);
-    const tableIdentifier = table.number ?? table.tableNumber ?? '1';
-
     const fallbackWaiter: Employee = {
       id: 'EMP-SYSTEM',
       name: 'Σερβιτόρος',
@@ -740,69 +727,115 @@ export class TableOrderService {
       tenantId,
       storeId
     };
-
     const waiter = currentEmp || fallbackWaiter;
 
-    const saleRecord: SaleRecord = {
-      id: `SALE-${Date.now()}`,
-      tenantId: currentEmp?.tenantId || table.tenantId || tenantId,
-      storeId: currentEmp?.storeId || table.storeId || storeId,
-      orderId: table.activeOrder?.orderId || `ORD-${Date.now()}`,
-      tableId: table.id,
-      tableNumber: tableIdentifier as any,
-      waiterId: waiter.id,
-      waiterName: waiter.name,
-      paymentMethod,
-      items: table.activeOrder?.items || [],
-      subtotalNet: Number((table.activeOrder?.subtotalNet || (grandTotal / 1.13)).toFixed(2)),
-      totalTax: Number((table.activeOrder?.totalTax || (grandTotal - (grandTotal / 1.13))).toFixed(2)),
-      grandTotal,
-      timestamp: new Date().toISOString()
-    };
+    const tableRef = doc(this.db, 'tables', tableId);
+    let finalizedSaleRecord: SaleRecord | null = null;
 
-    if (this.db) {
-      try {
-        await setDoc(doc(this.db, 'sales', saleRecord.id), safeFirestorePayload(saleRecord));
-      } catch (e) {
-        console.warn('Error writing sale record:', e);
+    try {
+      // 🛡️ ATOMIC TRANSACTION: Locks table and verifies it hasn't been closed by another terminal
+      await runTransaction(this.db, async (transaction) => {
+        const tableSnap = await transaction.get(tableRef);
+
+        if (!tableSnap.exists()) {
+          throw new Error('NOT_FOUND');
+        }
+
+        const tableData = tableSnap.data() as Table;
+
+        // Check 1: Already closed by another terminal?
+        if (tableData.status === 'FREE' || !tableData.activeOrder) {
+          throw new Error('ALREADY_SETTLED');
+        }
+
+        // Check 2: Unsent kitchen items?
+        const activeItems = tableData.activeOrder.items || [];
+        const unsentItems = activeItems.filter(item => item.status === 'PENDING');
+        if (unsentItems.length > 0) {
+          throw new Error('UNSENT_ITEMS');
+        }
+
+        const grandTotal = Number(tableData.activeOrder.grandTotal || tableData.currentTotal || 0);
+        const tableIdentifier = tableData.number ?? tableData.tableNumber ?? '1';
+
+        // Prepare immutable sale record
+        finalizedSaleRecord = {
+          id: `SALE-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          tenantId: waiter.tenantId || tableData.tenantId || tenantId,
+          storeId: waiter.storeId || tableData.storeId || storeId,
+          orderId: tableData.activeOrder.orderId || `ORD-${Date.now()}`,
+          tableId: tableData.id,
+          tableNumber: tableIdentifier as any,
+          waiterId: waiter.id,
+          waiterName: waiter.name,
+          paymentMethod,
+          items: activeItems,
+          subtotalNet: Number((tableData.activeOrder.subtotalNet || (grandTotal / 1.13)).toFixed(2)),
+          totalTax: Number((tableData.activeOrder.totalTax || (grandTotal - (grandTotal / 1.13))).toFixed(2)),
+          grandTotal,
+          timestamp: new Date().toISOString()
+        };
+
+        const saleRef = doc(this.db!, 'sales', finalizedSaleRecord.id);
+        transaction.set(saleRef, safeFirestorePayload(finalizedSaleRecord));
+
+        // Prepare clean freed table document
+        const cleanFreedTable = {
+          id: tableData.id,
+          number: tableIdentifier,
+          tableNumber: tableIdentifier,
+          name: tableData.name || `Τραπέζι ${tableIdentifier}`,
+          seats: tableData.seats || tableData.capacity || 4,
+          capacity: tableData.seats || tableData.capacity || 4,
+          section: tableData.section || 'INDOOR',
+          zone: tableData.zone || 'Σάλα',
+          tenantId: tableData.tenantId || tenantId,
+          storeId: tableData.storeId || storeId,
+          status: 'FREE' as const,
+          currentTotal: 0,
+          activeOrder: null,
+          activeOrderId: null,
+          waiterId: null,
+          waiterName: null,
+          assignedWaiterId: null,
+          assignedWaiterName: null,
+          reservation: null
+        };
+
+        transaction.set(tableRef, cleanFreedTable);
+      });
+
+      // Update local reactive state only after transaction commits successfully
+      this.tables.update(list => list.map(t => t.id === tableId ? ({
+        ...t,
+        status: 'FREE',
+        currentTotal: 0,
+        activeOrder: undefined,
+        activeOrderId: undefined,
+        waiterId: undefined,
+        waiterName: undefined
+      } as Table) : t));
+
+      if (finalizedSaleRecord && typeof onPaymentSuccessFn === 'function') {
+        onPaymentSuccessFn(finalizedSaleRecord);
       }
-    }
 
-    if (typeof onPaymentSuccessFn === 'function') {
-      onPaymentSuccessFn(saleRecord);
-    }
-
-    const cleanFreedTableData = {
-      id: table.id,
-      number: tableIdentifier,
-      tableNumber: tableIdentifier,
-      name: table.name || `Τραπέζι ${tableIdentifier}`,
-      seats: table.seats || table.capacity || 4,
-      capacity: table.seats || table.capacity || 4,
-      section: table.section || 'INDOOR',
-      zone: table.zone || 'Σάλα',
-      tenantId: table.tenantId || tenantId,
-      storeId: table.storeId || storeId,
-      status: 'FREE' as const,
-      currentTotal: 0,
-      activeOrder: null,
-      activeOrderId: null,
-      waiterId: null,
-      waiterName: null,
-      assignedWaiterId: null,
-      assignedWaiterName: null,
-      reservation: null
-    };
-
-    const updatedTables = this.tables().map(t => t.id === table.id ? (cleanFreedTableData as any) : t);
-    this.tables.set(updatedTables);
-
-    if (this.db) {
-      try {
-        await setDoc(doc(this.db, 'tables', table.id), cleanFreedTableData);
-      } catch (e) {
-        console.error('🔥 Error clearing table in Firestore:', e);
+    } catch (err: any) {
+      if (err.message === 'ALREADY_SETTLED') {
+        alert('ℹ️ Το τραπέζι έχει ήδη εξοφληθεί ή αποδεσμευτεί από άλλο τερματικό.');
+        // Refresh local table view
+        this.tables.update(list => list.map(t => t.id === tableId ? ({ ...t, status: 'FREE', currentTotal: 0, activeOrder: undefined } as Table) : t));
+        return;
       }
+
+      if (err.message === 'UNSENT_ITEMS') {
+        alert('⚠️ Υπάρχουν εκκρεμή προϊόντα που δεν έχουν σταλεί στην κουζίνα! Πατήστε "Αποστολή" πρώτα.');
+        throw err;
+      }
+
+      console.error('[TableOrderService] Transactional settlement failed:', err);
+      alert('Σφάλμα κατά την ολοκλήρωση της συναλλαγής. Παρακαλώ δοκιμάστε ξανά.');
+      throw err;
     }
   }
 

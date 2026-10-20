@@ -28,6 +28,11 @@
         [ngClass]="activeTab() === 'STOCK' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
   🏷️ Τιμοκατάλογος
 </button>
+<button (click)="setTab('MODIFIERS')"
+        class="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
+        [ngClass]="activeTab() === 'MODIFIERS' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
+  🔀 Modifiers
+</button>
 <button (click)="setTab('TABLES')"
         class="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all whitespace-nowrap cursor-pointer"
         [ngClass]="activeTab() === 'TABLES' ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'">
@@ -442,6 +447,92 @@
             </div>
           </div>
         }
+
+        <!-- ========================================== -->
+<!-- ⚡ TAB: MODIFIER GROUPS (PER TENANT) -->
+<!-- ========================================== -->
+@if (activeTab() === 'MODIFIERS') {
+  <div class="flex flex-col gap-4 animate-fade-in">
+    
+    <!-- HEADER BAR -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg">
+      <div>
+        <h2 class="text-base font-black text-white m-0 flex items-center gap-2">
+          <span>⚡</span> Ομάδες Επιλογών &amp; Extra (Modifiers)
+        </h2>
+        <p class="text-xs text-slate-400 mt-0.5">
+          Διαχειριστείτε τις προσαρμογές ανά κατάστημα (π.χ. Γλυκύτητα, Είδος Γάλακτος, Extra Προσθήκες).
+        </p>
+      </div>
+
+      <button (click)="openNewModifierModal()"
+              class="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-md transition-all active:scale-95 cursor-pointer flex items-center gap-1.5">
+        <span>➕</span>
+        <span>Νέα Ομάδα Επιλογών</span>
+      </button>
+    </div>
+
+    <!-- GROUPS GRID -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      @for (group of modifierGroups(); track group.id) {
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between shadow-md hover:border-slate-700 transition-all gap-3">
+          
+          <div class="flex flex-col gap-2">
+            <!-- Group Header -->
+            <div class="flex justify-between items-start">
+              <div>
+                <h3 class="text-sm font-black text-white m-0">{{ group.name }}</h3>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full mt-1 inline-block"
+                      [ngClass]="group.required ? 'bg-red-500/10 text-red-400 border border-red-500/30' : 'bg-slate-800 text-slate-400 border border-slate-700'">
+                  {{ group.required ? 'Υποχρεωτικό' : 'Προαιρετικό' }}
+                  (Έως {{ group.maxSelections || group.maxSelect || 1 }})
+                </span>
+              </div>
+
+              <!-- Action buttons -->
+              <div class="flex items-center gap-1">
+                <button (click)="openEditModifierModal(group)" 
+                        title="Επεξεργασία"
+                        class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer">
+                  ✏️
+                </button>
+                <button (click)="promptDeleteModifierGroup(group)" 
+                        title="Διαγραφή"
+                        class="p-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-500/30 text-xs cursor-pointer">
+                  🗑️
+                </button>
+              </div>
+            </div>
+
+            <!-- Options List Preview -->
+            <div class="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-slate-800/80">
+              @for (opt of group.options; track opt.id || opt.name) {
+                <span class="text-[11px] font-semibold bg-slate-950 border border-slate-800 px-2.5 py-1 rounded-xl text-slate-300 flex items-center gap-1.5">
+                  <span>{{ opt.name }}</span>
+                  @if (opt.priceExtra && opt.priceExtra > 0) {
+                    <span class="font-black text-emerald-400">+€{{ opt.priceExtra.toFixed(2) }}</span>
+                  } @else {
+                    <span class="text-[10px] text-slate-500">€0</span>
+                  }
+                </span>
+              }
+            </div>
+          </div>
+
+          <div class="text-[10px] text-slate-500 font-bold">
+            {{ group.options.length }} διαθέσιμες επιλογές
+          </div>
+
+        </div>
+      } @empty {
+        <div class="col-span-full text-center py-12 bg-slate-900/50 border-2 border-dashed border-slate-800 rounded-3xl text-slate-500 font-bold text-xs">
+          Δεν υπάρχουν ομάδες επιλογών για αυτό το κατάστημα. Πατήστε "Νέα Ομάδα Επιλογών" για να ξεκινήσετε.
+        </div>
+      }
+    </div>
+
+  </div>
+}
 
         <!-- TAB 5: SPOILAGE LOGS -->
         @if (activeTab() === 'SPOILAGE') {
@@ -905,8 +996,93 @@
         </div>
       }
 
- <!-- MODAL 7: RAW MATERIAL DIRECT STOCK ADJUSTMENT (ΑΠΟΓΡΑΦΗ) -->
-@if (adjustingRawMaterial(); as mat) {
+      <!-- ========================================== -->
+<!-- 📝 MODAL: CREATE / EDIT MODIFIER GROUP -->
+<!-- ========================================== -->
+@if (showModifierModal()) {
+  <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+    <div class="bg-slate-900 border border-slate-700 rounded-3xl p-6 w-full max-w-lg shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-hidden">
+      
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+        <h3 class="text-base font-black text-white m-0 flex items-center gap-2">
+          <span>⚡</span>
+          <span>{{ editingModifierGroup() ? 'Επεξεργασία Ομάδας' : 'Νέα Ομάδα Επιλογών' }}</span>
+        </h3>
+        <button (click)="closeModifierModal()" class="text-slate-400 hover:text-white text-lg cursor-pointer">✕</button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto flex flex-col gap-4 pr-1">
+        
+        <!-- Group Name -->
+        <div class="flex flex-col gap-1.5">
+          <label class="text-xs font-bold text-slate-400 uppercase">Όνομα Ομάδας (π.χ. Είδος Γάλακτος)</label>
+          <input type="text" [(ngModel)]="groupFormName" placeholder="π.χ. Σάλτσες / Extras"
+                 class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400" />
+        </div>
+
+        <!-- Rules: Required & Max Selections -->
+        <div class="grid grid-cols-2 gap-3 bg-slate-950 p-3 rounded-2xl border border-slate-800">
+          <label class="flex items-center gap-2 text-xs font-bold text-slate-300 cursor-pointer">
+            <input type="checkbox" [(ngModel)]="groupFormRequired" class="w-4 h-4 rounded text-amber-500 focus:ring-0" />
+            <span>Υποχρεωτική Επιλογή</span>
+          </label>
+
+          <div class="flex items-center justify-end gap-2">
+            <span class="text-xs font-bold text-slate-400">Μέγιστες:</span>
+            <input type="number" min="1" max="10" [(ngModel)]="groupFormMax"
+                   class="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-center text-amber-400 font-bold focus:outline-none focus:border-amber-400" />
+          </div>
+        </div>
+
+        <!-- OPTIONS LIST IN FORM -->
+        <div class="flex flex-col gap-2">
+          <label class="text-xs font-bold text-slate-400 uppercase">Επιλογές &amp; Χρεώσεις</label>
+          
+          <div class="flex flex-col gap-1.5 max-h-48 overflow-y-auto">
+            @for (opt of groupFormOptions(); track $index) {
+              <div class="flex items-center justify-between gap-2 bg-slate-950 border border-slate-800 p-2 rounded-xl">
+                <span class="text-xs font-bold text-white flex-1 truncate">{{ opt.name }}</span>
+                <span class="text-xs font-black text-emerald-400">
+                  {{ opt.priceExtra > 0 ? '+€' + opt.priceExtra.toFixed(2) : 'Δωρεάν' }}
+                </span>
+                <button (click)="removeOptionFromForm($index)" class="text-red-400 hover:text-red-300 text-xs px-2 py-1 cursor-pointer">
+                  ✕
+                </button>
+              </div>
+            }
+          </div>
+
+          <!-- ADD NEW OPTION ROW -->
+          <div class="flex items-center gap-2 mt-2 pt-2 border-t border-slate-800">
+            <input type="text" [(ngModel)]="newOptionName" placeholder="Όνομα (π.χ. Oat Milk)"
+                   class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400" />
+            <input type="number" step="0.10" [(ngModel)]="newOptionPrice" placeholder="€ Extra"
+                   class="w-20 bg-slate-950 border border-slate-700 rounded-xl px-2 py-1.5 text-xs text-center text-emerald-400 font-bold focus:outline-none focus:border-amber-400" />
+            <button (click)="addOptionToForm()"
+                    type="button"
+                    class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 font-black text-xs border border-slate-700 cursor-pointer">
+              ➕
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="flex gap-2 pt-3 border-t border-slate-800">
+        <button (click)="closeModifierModal()" class="flex-1 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-slate-300 text-xs cursor-pointer">
+          Ακύρωση
+        </button>
+        <button (click)="saveModifierGroup()" class="flex-1 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 font-black text-slate-950 text-xs shadow-md cursor-pointer transition-all active:scale-95">
+          💾 Αποθήκευση Ομάδας
+        </button>
+      </div>
+
+    </div>
+  </div>
+   }
+
+      <!-- MODAL 7: RAW MATERIAL DIRECT STOCK ADJUSTMENT (ΑΠΟΓΡΑΦΗ) -->
+       @if (adjustingRawMaterial(); as mat) {
   <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
     <div class="bg-slate-800 border border-slate-700 rounded-3xl p-6 w-full max-w-md shadow-2xl flex flex-col gap-4">
       <div class="flex justify-between items-center border-b border-slate-700 pb-3">
@@ -949,6 +1125,6 @@
       </div>
     </div>
   </div>
-}
+       }
 
     </div>

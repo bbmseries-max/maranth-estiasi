@@ -186,7 +186,7 @@ export class RestaurantPosService {
   });
 
   public totalDailyGrossSales = computed(() => {
-    const settledSalesTotal = this.salesHistory().reduce((acc, s) => acc + (s.grandTotal || 0), 0);
+    const settledSalesTotal = this.currentWindowSales().reduce((acc, s) => acc + (s.grandTotal || 0), 0);
     return Number((settledSalesTotal + this.totalLiveFloorRevenue()).toFixed(2));
   });
 
@@ -194,14 +194,38 @@ export class RestaurantPosService {
   public totalCardInVaults = computed(() => this.totalDailyCardInVaults());
   public totalStartingFloats = computed(() => this.totalDailyStartingFloats());
   public totalGrossSales = computed(() => this.totalDailyGrossSales());
+  public modifierGroups = this.inventoryService.modifierGroups;
 
-  // VAT Calculations
+  // Finds the timestamp of the last recorded Z-report for this store
+  public lastZReportTimestamp = computed<string | null>(() => {
+    const list = this.zReports();
+    if (list.length === 0) return null;
+    // zReports are already sorted desc by timestamp
+    return list[0].timestamp || null;
+  });
+
+  // Sales strictly belonging to the current open business window
+  public currentWindowSales = computed<SaleRecord[]>(() => {
+    const lastZTime = this.lastZReportTimestamp();
+    const allSales = this.salesHistory();
+
+    if (!lastZTime) {
+      return allSales; // First day of operation: all recorded sales
+    }
+
+    const lastZEpoch = new Date(lastZTime).getTime();
+    return allSales.filter(s => new Date(s.timestamp).getTime() > lastZEpoch);
+  });
+
+  // Active business window VAT Breakdown
   public vatBreakdown = computed(() => {
     let gross13 = 0; let net13 = 0; let vat13 = 0;
     let gross24 = 0; let net24 = 0; let vat24 = 0;
     let gross6 = 0;  let net6 = 0;  let vat6 = 0;
 
-    for (const sale of this.salesHistory()) {
+    const sales = this.currentWindowSales();
+
+    for (const sale of sales) {
       if (!sale.items || sale.items.length === 0) {
         const gross = sale.grandTotal || 0;
         const net = gross / 1.13;
@@ -1008,13 +1032,16 @@ export class RestaurantPosService {
     const emp = this.currentEmployee();
     const { tenantId, storeId } = this.getActiveTenantAndStore();
     const vat = this.vatBreakdown();
-    const todayStr = new Date().toLocaleDateString('el-GR');
+    const activeWindow = this.currentWindowSales();
+    const nowIso = new Date().toISOString();
+    const dateDisplay = new Date().toLocaleDateString('el-GR');
 
-    const totalCash = this.salesHistory().reduce(
+    // Aggregate cash and card strictly from the current business window
+    const totalCash = activeWindow.reduce(
       (sum, s) => sum + (s.paymentMethod === 'CASH' ? (s.grandTotal || 0) : 0), 
       0
     );
-    const totalCard = this.salesHistory().reduce(
+    const totalCard = activeWindow.reduce(
       (sum, s) => sum + (s.paymentMethod === 'CARD' ? (s.grandTotal || 0) : 0), 
       0
     );
@@ -1023,8 +1050,8 @@ export class RestaurantPosService {
       id: `Z-REPORT-${Date.now()}`,
       tenantId: emp?.tenantId || tenantId,
       storeId: emp?.storeId || storeId,
-      dateStr: todayStr,
-      timestamp: new Date().toISOString(),
+      dateStr: dateDisplay,
+      timestamp: nowIso,
       closedByEmployeeId: emp?.id || 'SYSTEM',
       closedByEmployeeName: emp?.name || 'Manager',
       totalCash: Number(totalCash.toFixed(2)),
@@ -1039,7 +1066,9 @@ export class RestaurantPosService {
     };
 
     if (this.db) {
-      setDoc(doc(this.db, 'z_reports', snapshot.id), cleanUndefined(snapshot)).catch(() => {});
+      setDoc(doc(this.db, 'z_reports', snapshot.id), cleanUndefined(snapshot)).catch((err) => {
+        console.error('Error saving Z-Report:', err);
+      });
     }
 
     this.zReports.update(list => [snapshot, ...list]);

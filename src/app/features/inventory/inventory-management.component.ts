@@ -1,7 +1,8 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { ModifierGroup, ModifierOption } from '../../core/modals';
 import { GreekVatRate } from '../../core/modals/restaurant-pos.modals';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
 import { 
@@ -14,6 +15,17 @@ import {
   UnitOfMeasure
 } from '../../core/modals/restaurant-pos.modals';
 
+export type InventoryTab = 
+  | 'RECEIVING' 
+  | 'STOCK' 
+  | 'TABLES' 
+  | 'STAFF' 
+  | 'SPOILAGE' 
+  | 'PRODUCTS' 
+  | 'CATEGORIES' 
+  | 'RAW_MATERIALS' 
+  | 'MODIFIERS';
+
 @Component({
   selector: 'app-inventory-management',
   standalone: true,
@@ -23,8 +35,24 @@ import {
 export class InventoryManagementComponent {
   public posService = inject(RestaurantPosService);
 
-  public activeTab = signal<'RECEIVING' | 'STOCK' | 'TABLES' | 'STAFF' | 'SPOILAGE'>('RECEIVING');
+  public activeTab = signal<InventoryTab>(
+  (sessionStorage.getItem('inv_active_tab') as InventoryTab) || 'STOCK'
+);
   public isRegisteringBiometrics = signal<boolean>(false);
+  public showModifierModal = signal<boolean>(false);
+  public editingModifierGroup = signal<ModifierGroup | null>(null);
+  public groupFormName = '';
+public groupFormRequired = false;
+public groupFormMin = 0;
+public groupFormMax = 1;
+public groupFormOptions = signal<{ id?: string; name: string; priceExtra: number; available: boolean }[]>([]);
+
+// Temporary row inputs for adding options inside the modal
+public newOptionName = '';
+public newOptionPrice = 0;
+
+// Getter for modifier groups
+public modifierGroups = computed(() => this.posService.inventoryService.modifierGroups());
 
   // Receiving Tab Fields
   public receivingItemName = '';
@@ -235,10 +263,113 @@ export class InventoryManagementComponent {
     return ['RECEIVING', 'STOCK', 'TABLES', 'STAFF', 'SPOILAGE'].includes(saved) ? saved : 'RECEIVING';
   }
 
-  public setTab(tab: 'RECEIVING' | 'STOCK' | 'TABLES' | 'STAFF' | 'SPOILAGE'): void {
-    this.activeTab.set(tab);
-    sessionStorage.setItem('inv_active_tab', tab);
+  public setTab(tab: InventoryTab): void {
+  this.activeTab.set(tab);
+  sessionStorage.setItem('inv_active_tab', tab);
+}
+
+  // --- MODIFIER ACTIONS ---
+public openNewModifierModal(): void {
+  this.editingModifierGroup.set(null);
+  this.groupFormName = '';
+  this.groupFormRequired = false;
+  this.groupFormMin = 0;
+  this.groupFormMax = 1;
+  this.groupFormOptions.set([
+    { name: 'Επιλογή 1', priceExtra: 0, available: true }
+  ]);
+  this.newOptionName = '';
+  this.newOptionPrice = 0;
+  this.showModifierModal.set(true);
+}
+
+public openEditModifierModal(group: ModifierGroup): void {
+  this.editingModifierGroup.set(group);
+  this.groupFormName = group.name;
+  this.groupFormRequired = group.required ?? false;
+  this.groupFormMin = group.minSelections ?? group.minSelect ?? 0;
+  this.groupFormMax = group.maxSelections ?? group.maxSelect ?? 1;
+  this.groupFormOptions.set(
+    (group.options || []).map(o => ({
+      id: o.id,
+      name: o.name,
+      priceExtra: o.priceExtra || 0,
+      available: o.available ?? true
+    }))
+  );
+  this.newOptionName = '';
+  this.newOptionPrice = 0;
+  this.showModifierModal.set(true);
+}
+
+public closeModifierModal(): void {
+  this.showModifierModal.set(false);
+  this.editingModifierGroup.set(null);
+}
+
+public addOptionToForm(): void {
+  const name = this.newOptionName.trim();
+  if (!name) return;
+
+  this.groupFormOptions.update(opts => [
+    ...opts,
+    {
+      name,
+      priceExtra: Number(this.newOptionPrice) || 0,
+      available: true
+    }
+  ]);
+
+  this.newOptionName = '';
+  this.newOptionPrice = 0;
+}
+
+public removeOptionFromForm(index: number): void {
+  this.groupFormOptions.update(opts => opts.filter((_, i) => i !== index));
+}
+
+public async saveModifierGroup(): Promise<void> {
+  const name = this.groupFormName.trim();
+  if (!name) {
+    alert('Παρακαλώ εισάγετε όνομα ομάδας επιλογών.');
+    return;
   }
+
+  const options = this.groupFormOptions();
+  if (options.length === 0) {
+    alert('Πρέπει να προσθέσετε τουλάχιστον μία επιλογή (π.χ. Σκέτος, Μέτριος).');
+    return;
+  }
+
+  const groupData = {
+    name,
+    required: this.groupFormRequired,
+    minSelections: this.groupFormRequired ? Math.max(1, this.groupFormMin) : this.groupFormMin,
+    maxSelections: Math.max(1, this.groupFormMax),
+    options: options.map(o => ({
+      id: o.id || '',
+      name: o.name.trim(),
+      priceExtra: Number(o.priceExtra) || 0,
+      available: o.available
+    }))
+  };
+
+  const editing = this.editingModifierGroup();
+  if (editing) {
+    await this.posService.inventoryService.updateModifierGroup(editing.id, groupData);
+  } else {
+    await this.posService.inventoryService.addModifierGroup(groupData);
+  }
+
+  this.closeModifierModal();
+}
+
+public async promptDeleteModifierGroup(group: ModifierGroup): Promise<void> {
+  const confirmed = confirm(`Είστε σίγουρος ότι θέλετε να διαγράψετε την ομάδα "${group.name}";`);
+  if (!confirmed) return;
+
+  await this.posService.inventoryService.deleteModifierGroup(group.id);
+}
 
   public openNewTableModal(): void {
     this.editingTableId.set(null);
