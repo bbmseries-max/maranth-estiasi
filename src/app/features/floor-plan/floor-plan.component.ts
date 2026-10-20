@@ -4,6 +4,7 @@ import { Component, inject, signal, computed, ChangeDetectionStrategy } from '@a
 import { CommonModule } from '@angular/common';
 import { VaultClosureModalComponent } from '../staff/components/vault-closure-modal/vault-closure-modal.component';
 import { FormsModule } from '@angular/forms';
+import { TenantContextService } from '../../core/services/tenant-context.service';
 import { Router } from '@angular/router';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
 import { RestaurantTable, WaiterVaultSession } from '../../core/modals/restaurant-pos.modals';
@@ -20,6 +21,7 @@ export type TableVisualStatus = 'FREE' | 'PENDING' | 'PREPARING' | 'READY_TO_SER
 export class FloorPlanComponent {
   public posService = inject(RestaurantPosService);
   private router = inject(Router);
+  public tenantContext = inject(TenantContextService);
 
   public closingVault = signal<WaiterVaultSession | null>(null);
   public selectedZone = signal<string>('ALL');
@@ -43,7 +45,8 @@ export class FloorPlanComponent {
     }
     if (!table || !table.id) return;
 
-    this.router.navigate(['/order', table.id]);
+    const slug = this.tenantContext.currentTenantId() || 'coffee-shop-demo';
+    this.router.navigate(['/t', slug, 'order', table.id]);
   }
 
   public openTakeaway(event?: Event): void {
@@ -67,7 +70,8 @@ export class FloorPlanComponent {
         currentTotal: 0
       };
     }
-    this.router.navigate(['/order', takeawayTable.id]);
+    const slug = this.tenantContext.currentTenantId() || 'coffee-shop-demo';
+    this.router.navigate(['/t', slug, 'order', takeawayTable.id]);
   }
 
   public handleManagerSettlement(tableId: string, method: 'CASH' | 'CARD', event?: Event): void {
@@ -180,18 +184,19 @@ export class FloorPlanComponent {
     const myVault = this.posService.activeVaultSession();
     const activeVaults = this.posService.activeVaultSessions();
     const isManagerRole = ['MANAGER', 'ADMIN', 'OWNER'].includes(String(currentEmp?.role || '').toUpperCase());
+    const slug = this.tenantContext.currentTenantId() || 'coffee-shop-demo';
 
     if (!myVault && isManagerRole && activeVaults.length > 0) {
       const selectedVaultId = this.promptSelectActiveWaiterVault(activeVaults);
       if (selectedVaultId) {
         await this.posService.settleTablePayment(tableId, method, selectedVaultId);
-        this.router.navigate(['/floor-plan'], { replaceUrl: true });
+        this.router.navigate(['/t', slug, 'floor-plan'], { replaceUrl: true });
       }
       return;
     }
 
     await this.posService.settleTablePayment(tableId, method);
-    this.router.navigate(['/floor-plan'], { replaceUrl: true });
+    this.router.navigate(['/t', slug, 'floor-plan'], { replaceUrl: true });
   }
 
   private promptSelectActiveWaiterVault(activeVaults: WaiterVaultSession[]): string | null {
@@ -278,9 +283,10 @@ export class FloorPlanComponent {
     }
   }
 
-  public seatReservedTable(table: RestaurantTable, event?: Event): void {
+   public seatReservedTable(table: RestaurantTable, event?: Event): void {
     if (event) event.stopPropagation();
-    this.router.navigate(['/order', table.id]);
+    const slug = this.tenantContext.currentTenantId() || 'coffee-shop-demo';
+    this.router.navigate(['/t', slug, 'order', table.id]);
   }
 
   public sortTables(tables: RestaurantTable[]): RestaurantTable[] {

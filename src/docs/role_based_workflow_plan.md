@@ -87,3 +87,18 @@ Restrictions: Hides drink items. Strictly locked to /kitchen. No access to table
 Default View: Floor Plan (/floor-plan).
 
 Capabilities: Full system authority. Can switch between Floor Plan, KDS Display, Goods Receiving, Menu Management, Staff PIN setup, and Shift Z-Reports.
+# Security & Architecture Audit Report: POS Order Terminal
+**Target File:** `src/app/features/pos/order-terminal.component.ts`  
+**Classification:** Critical Multi-Tenant Authorization, Data Race, and Financial Vulnerabilities
+
+---
+
+## 1. Vulnerability & Risk Analysis
+
+### Finding 1: Unvalidated Cross-Tenant Table Access via URL (`activeTableId`) (Severity: CRITICAL)
+* **Location:** `ngOnInit()`:
+  ```typescript
+  const tableId = this.route.snapshot.paramMap.get('tableId');
+  if (tableId) {
+    this.activeTableId.set(tableId);
+  }

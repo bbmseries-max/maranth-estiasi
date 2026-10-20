@@ -3,10 +3,11 @@
   <!-- TOP NAVIGATION BAR -->
   <header class="h-16 bg-slate-800 border-b border-slate-700/80 px-4 flex items-center justify-between shadow-md shrink-0">
     <div class="flex items-center gap-3">
-      <a routerLink="/floor-plan" class="p-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs no-underline flex items-center gap-1.5 transition-all cursor-pointer">
-        <span>⬅️</span>
-        <span class="hidden sm:inline">Πλάνο</span>
-      </a>
+      <a [routerLink]="['/t', tenantContext.currentTenantId(), 'floor-plan']" 
+   class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs flex items-center gap-2 cursor-pointer no-underline">
+  <span>⬅️</span>
+  <span>Πλάνο</span>
+</a>
       <div>
         <h1 class="text-lg font-black text-white m-0">
           Τραπέζι #{{ activeTable()?.tableNumber || activeTable()?.number || '?' }}
@@ -156,15 +157,16 @@
             </div>
 
             <!-- MODIFIERS SUMMARY -->
-            @if (item.modifiers && item.modifiers.length > 0) {
-              <div class="flex flex-wrap gap-1">
-                @for (mod of item.modifiers; track mod.name) {
-                  <span class="text-[10px] bg-slate-800 text-amber-400 px-2 py-0.5 rounded-full border border-slate-700">
-                    + {{ mod.name }}
-                  </span>
-                }
-              </div>
-            }
+           <!-- ✅ AFTER: -->
+@if (item.modifiers && item.modifiers.length > 0) {
+  <div class="flex flex-wrap gap-1">
+    @for (mod of item.modifiers; track (mod.id || mod.optionId || mod.name || $index)) {
+      <span class="text-[10px] bg-slate-800 text-amber-400 px-2 py-0.5 rounded-full border border-slate-700">
+        + {{ mod.name || mod.optionName || 'Επιλογή' }}
+      </span>
+    }
+  </div>
+}
 
             @if (item.itemNotes) {
               <span class="text-[10px] text-slate-400 italic">📝 {{ item.itemNotes }}</span>
@@ -322,7 +324,7 @@
             </div>
 
             <div class="grid grid-cols-2 gap-2.5">
-              @for (opt of group.options; track opt.id) {
+              @for (opt of group.options; track opt.id  || $index) {
                 <button (click)="toggleModifierOption(group.id, opt.id, group.maxSelections)"
                         type="button"
                         class="px-3.5 py-3 rounded-2xl border text-left flex justify-between items-center transition-all cursor-pointer"

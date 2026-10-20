@@ -1,76 +1,92 @@
+// src/app/app.routes.ts
+
 import { Routes } from '@angular/router';
 import { roleGuard } from './core/guards/role.guard';
+import { tenantExistsGuard } from './core/guards/tenant.guard';
 
 export const routes: Routes = [
+  // 1. Root redirect defaults to demo tenant
+  
+  
   { 
     path: '', 
-    redirectTo: 'login', 
-    pathMatch: 'full' 
+    pathMatch: 'full',
+    redirectTo: 't/coffee-shop-demo/login'
   },
+
+  // 2. Tenant Direct Routes (No nested router-outlet required)
   {
-    path: 'login',
+    path: 't/:tenantSlug/login',
+    canActivate: [tenantExistsGuard],
     loadComponent: () => import('./features/auth/waiter-login.component')
       .then(m => m.WaiterLoginComponent),
     title: 'Maranth Estiasi - Είσοδος'
   },
   {
-    path: 'floor-plan',
+    path: 't/:tenantSlug/floor-plan',
+    canActivate: [tenantExistsGuard, roleGuard],
     loadComponent: () => import('./features/floor-plan/floor-plan.component')
       .then(m => m.FloorPlanComponent),
-    canActivate: [roleGuard],
     data: { roles: ['BARISTA', 'MANAGER', 'ADMIN', 'OWNER', 'WAITER', 'HEAD_WAITER'] },
     title: 'Maranth Estiasi - Πλάνο Τραπεζιών'
   },
   {
-    path: 'order/:tableId',
+    path: 't/:tenantSlug/order/:tableId',
+    canActivate: [tenantExistsGuard, roleGuard],
     loadComponent: () => import('./features/pos/order-terminal.component')
       .then(m => m.OrderTerminalComponent),
-    canActivate: [roleGuard],
     data: { roles: ['MANAGER', 'BARISTA', 'ADMIN', 'OWNER', 'WAITER', 'HEAD_WAITER'] },
     title: 'Maranth Estiasi - Παραγγελιοληψία'
   },
   {
-    path: 'kitchen',
+    path: 't/:tenantSlug/kitchen',
+    canActivate: [tenantExistsGuard, roleGuard],
     loadComponent: () => import('./features/kitchen/kds-display.component')
       .then(m => m.KdsDisplayComponent),
-    canActivate: [roleGuard],
     data: { roles: ['BAR', 'BARISTA', 'MANAGER', 'ADMIN', 'OWNER', 'KITCHEN'] },
     title: 'Maranth Estiasi - Οθόνη Κουζίνας & Bar'
   },
   {
-    path: 'inventory',
+    path: 't/:tenantSlug/inventory',
+    canActivate: [tenantExistsGuard, roleGuard],
     loadComponent: () => import('./features/inventory/inventory-management.component')
       .then(m => m.InventoryManagementComponent),
-    canActivate: [roleGuard],
     data: { roles: ['MANAGER', 'ADMIN', 'OWNER'] },
     title: 'Maranth Estiasi - Αποθήκη & Τιμοκατάλογος'
   },
   {
-    path: 'staff',
+    path: 't/:tenantSlug/staff',
+    canActivate: [tenantExistsGuard, roleGuard],
     loadComponent: () => import('./features/staff/staff-management.component')
       .then(m => m.StaffManagementComponent),
-    canActivate: [roleGuard],
     data: { roles: ['MANAGER', 'ADMIN', 'OWNER'] },
     title: 'Maranth Estiasi - Προσωπικό'
   },
   {
-    path: 'reports',
+    path: 't/:tenantSlug/reports',
+    canActivate: [tenantExistsGuard, roleGuard],
     loadComponent: () => import('./features/reports/shift-reports.component')
       .then(m => m.ShiftReportsComponent),
-    canActivate: [roleGuard],
     data: { roles: ['MANAGER', 'ADMIN', 'OWNER'] },
     title: 'Maranth Estiasi - Z-Report'
   },
   {
-    path: 'settings',
+    path: 't/:tenantSlug/settings',
+    canActivate: [tenantExistsGuard, roleGuard],
     loadComponent: () => import('./features/settings/settings.component')
       .then(m => m.SettingsComponent),
-    canActivate: [roleGuard],
     data: { roles: ['MANAGER', 'ADMIN', 'OWNER'] },
     title: 'Maranth Estiasi - Settings'
   },
+
+  // 3. Fallback for root /login or unknown paths
+  {
+    path: 'login',
+    redirectTo: 't/coffee-shop-demo/login',
+    pathMatch: 'full'
+  },
   {
     path: '**',
-    redirectTo: 'login'
+    redirectTo: 't/coffee-shop-demo/login'
   }
 ];

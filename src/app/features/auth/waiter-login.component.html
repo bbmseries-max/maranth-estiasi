@@ -2,65 +2,18 @@
   
   <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col items-center relative">
     
-    <!-- 🔑 STAGE 1: DEVICE INITIAL ACTIVATION SETUP -->
-    @if (step() === 'DEVICE_SETUP') {
-      <div class="w-full flex flex-col items-center text-center animate-fade-in">
-        <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-400 flex items-center justify-center text-3xl shadow-lg mb-3">
-          📱
-        </div>
-        <h1 class="text-2xl font-black text-white m-0">Ενεργοποίηση Τερματικού</h1>
-        <p class="text-xs text-slate-400 font-medium mt-1 mb-6">
-          Εισάγετε τον 6-ψήφιο κωδικό άδειας (License Key) του καταστήματός σας.
-        </p>
-
-        <div class="w-full flex flex-col gap-3 mb-6">
-          <input 
-            type="text" 
-            [(ngModel)]="licenseInput"
-            placeholder="π.χ. TK-1974" 
-            class="w-full bg-slate-950 border-2 border-slate-700 focus:border-amber-400 rounded-2xl px-4 py-3.5 text-center text-2xl font-black font-mono tracking-widest text-amber-400 uppercase outline-none transition-all shadow-inner" />
-          
-          <button 
-            type="button"
-            (click)="submitActivationKey()"
-            [disabled]="isActivating()"
-            class="w-full py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-base shadow-lg transition-all active:scale-95 cursor-pointer">
-            {{ isActivating() ? 'Έλεγχος Άδειας...' : '🚀 Σύνδεση & Ενεργοποίηση' }}
-          </button>
-        </div>
-
-        <!-- QUICK TEST PRESETS (For quick switching / demo) -->
-        <div class="w-full border-t border-slate-800 pt-4 text-left">
-          <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-2">Γρήγορες Επιλογές Demo:</span>
-          <div class="grid grid-cols-2 gap-2">
-            <button (click)="quickSetKey('TK-1974')" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 flex items-center gap-1.5 cursor-pointer">
-              <span>☕</span>
-              <span>Tiranë Kafe</span>
-            </button>
-            <button (click)="quickSetKey('DEMO-01')" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 flex items-center gap-1.5 cursor-pointer">
-              <span>✨</span>
-              <span>Demo Estiasi</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    }
-
-    <!-- ⚡ STAGE 2: DAILY WAITER 4-DIGIT PIN PAD -->
+    <!-- ⚡ DAILY WAITER 4-DIGIT PIN PAD -->
     @if (step() === 'PIN_ENTRY') {
       <!-- ACTIVE SHOP BRAND HEADER -->
       <div class="flex flex-col items-center mb-6 text-center">
         <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-400 flex items-center justify-center text-3xl shadow-lg mb-2">
-          {{ activeShop()?.storeIcon || '☕' }}
+          {{ activeShop()?.icon || '☕' }}
         </div>
-        <h1 class="text-2xl font-black tracking-tight text-white m-0">{{ activeShop()?.storeName }}</h1>
+        <h1 class="text-2xl font-black tracking-tight text-white m-0">{{ activeShop()?.name }}</h1>
         <div class="flex items-center gap-2 mt-1">
           <span class="text-[11px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full">
             {{ activeShop()?.city }}
           </span>
-          <button (click)="promptUnpairDevice()" title="Αποσύνδεση Συσκευής" class="text-xs text-slate-500 hover:text-slate-300 cursor-pointer">
-            ⚙️
-          </button>
         </div>
       </div>
 
@@ -94,8 +47,8 @@
           Clear
         </button>
         <button (click)="appendDigit('0')"
-                class="h-16 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-white font-bold text-2xl transition-all border border-slate-700/50 shadow-md flex items-center justify-center cursor-pointer">
-          0
+                  class="h-16 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-white font-bold text-2xl transition-all border border-slate-700/50 shadow-md flex items-center justify-center cursor-pointer">
+            0
         </button>
         <button (click)="submitPin()"
                 [disabled]="enteredPin().length < 4"
@@ -105,43 +58,41 @@
       </div>
     }
 
-  @if (step() === 'SHIFT_SETUP') {
-  <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl max-w-md w-full flex flex-col gap-5">
-    <div class="text-center">
-      <h2 class="text-lg font-black text-white m-0">💰 Άνοιγμα Βάρδιας & Ταμείου</h2>
-      <p class="text-xs text-slate-400 mt-1">
-        Εισάγετε το αρχικό ποσό μετρητών (ρέστα) που παραλαμβάνετε στο πορτοφόλι σας.
-      </p>
-    </div>
+    <!-- 💰 SHIFT SETUP MODAL -->
+    @if (step() === 'SHIFT_SETUP') {
+      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl max-w-md w-full flex flex-col gap-5">
+        <div class="text-center">
+          <h2 class="text-lg font-black text-white m-0">💰 Άνοιγμα Βάρδιας & Ταμείου</h2>
+          <p class="text-xs text-slate-400 mt-1">
+            Εισάγετε το αρχικό ποσό μετρητών (ρέστα) που παραλαμβάνετε στο πορτοφόλι σας.
+          </p>
+        </div>
 
-    <!-- STARTING FLOAT INPUT -->
-    <div class="flex flex-col gap-2">
-      <label class="text-[11px] font-bold text-slate-400 uppercase text-center">Αρχικό Ταμείο (€)</label>
-      <input type="number" 
-             step="5" 
-             [(ngModel)]="startingFloat" 
-             class="bg-slate-950 border border-slate-700 rounded-2xl py-4 text-3xl font-black text-center text-emerald-400 focus:outline-none focus:border-amber-400" />
-      
-      <!-- QUICK PRESET BUTTONS -->
-      <div class="grid grid-cols-4 gap-2 mt-1">
-        <button type="button" (click)="startingFloat = 0" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300">€0</button>
-        <button type="button" (click)="startingFloat = 30" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300">€30</button>
-        <button type="button" (click)="startingFloat = 50" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-emerald-400 border border-emerald-500/30">€50</button>
-        <button type="button" (click)="startingFloat = 100" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300">€100</button>
+        <div class="flex flex-col gap-2">
+          <label class="text-[11px] font-bold text-slate-400 uppercase text-center">Αρχικό Ταμείο (€)</label>
+          <input type="number" 
+                 step="5" 
+                 [(ngModel)]="startingFloat" 
+                 class="bg-slate-950 border border-slate-700 rounded-2xl py-4 text-3xl font-black text-center text-emerald-400 focus:outline-none focus:border-amber-400" />
+          
+          <div class="grid grid-cols-4 gap-2 mt-1">
+            <button type="button" (click)="startingFloat = 0" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300">€0</button>
+            <button type="button" (click)="startingFloat = 30" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300">€30</button>
+            <button type="button" (click)="startingFloat = 50" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-emerald-400 border border-emerald-500/30">€50</button>
+            <button type="button" (click)="startingFloat = 100" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300">€100</button>
+          </div>
+        </div>
+
+        <div class="flex gap-2 pt-3 border-t border-slate-800">
+          <button (click)="cancelShiftSetup()" class="flex-1 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 font-bold text-slate-300 text-xs cursor-pointer">
+            Ακύρωση
+          </button>
+          <button (click)="startShiftAndVault()" class="flex-1 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-black text-white text-xs shadow-lg cursor-pointer transition-all active:scale-95">
+            ✓ Έναρξη Βάρδιας
+          </button>
+        </div>
       </div>
-    </div>
-
-    <!-- ACTION BUTTONS -->
-    <div class="flex gap-2 pt-3 border-t border-slate-800">
-      <button (click)="cancelShiftSetup()" class="flex-1 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 font-bold text-slate-300 text-xs cursor-pointer">
-        Ακύρωση
-      </button>
-      <button (click)="startShiftAndVault()" class="flex-1 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-black text-white text-xs shadow-lg cursor-pointer transition-all active:scale-95">
-        ✓ Έναρξη Βάρδιας
-      </button>
-    </div>
-  </div>
-}
+    }
 
     <!-- ERROR ALERT -->
     @if (errorMessage()) {

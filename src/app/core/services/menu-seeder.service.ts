@@ -16,11 +16,32 @@ export interface SeedMenuData {
   providedIn: 'root'
 })
 export class MenuSeederService {
+ private posService = inject(RestaurantPosService);
   private tenantContext = inject(TenantContextService);
-  private injector = inject(Injector);
 
-  private get posService(): RestaurantPosService {
-    return this.injector.get(RestaurantPosService);
+  public async checkAndSeedDemoIfNeeded(): Promise<void> {
+    const tenantId = this.tenantContext.currentTenantId();
+    const storeId = this.tenantContext.currentStoreId();
+
+    // 1. Wait a moment for initial Firestore sync to evaluate
+    setTimeout(async () => {
+      const currentProducts = this.posService.products();
+      const currentTables = this.posService.tables();
+
+      // If store is completely empty (no products or no tables), provision the starter pack!
+      if (currentProducts.length === 0) {
+        await this.posService.seedDefaultMenuForCurrentStore();
+      }
+
+      if (currentTables.length === 0) {
+        const defaultTables = (this.posService.tableOrderService as any).getInitialDefaultTables(tenantId, storeId);
+        if (this.posService.db && defaultTables) {
+          for (const tbl of defaultTables) {
+            await (this.posService.tableOrderService as any).addTable(tbl);
+          }
+        }
+      }
+    }, 1200);
   }
 
   /**
@@ -31,7 +52,7 @@ export class MenuSeederService {
 
     // 🔒 Block seeding for active client accounts unless forced
     if (activeTenant !== 'coffee-shop-demo' && !force) {
-      console.log(`🔒 Guarded: Suppressed automatic demo seed because active store is "${activeTenant}".`);
+      
       return null;
     }
 
@@ -46,7 +67,6 @@ export class MenuSeederService {
       const activeTenant = this.tenantContext.currentTenantId();
       const activeStore = this.tenantContext.currentStoreId();
 
-      console.log(`📡 Fetching /seeds/coffee-shop-menu.seed.json for [${activeTenant}]...`);
       const response = await fetch('/seeds/coffee-shop-menu.seed.json');
 
       if (!response.ok) {
@@ -92,31 +112,11 @@ export class MenuSeederService {
         pos.inventoryService.modifierGroups.set(stampedModifierGroups);
       }
 
-      console.log(`✅ Loaded Seed Data for [${activeTenant}]: ${stampedCategories.length} categories, ${stampedProducts.length} products.`);
       return seedData;
     } catch (error) {
       console.error('❌ Failed to load coffee-shop-menu.seed.json:', error);
       return null;
     }
-  }
-
-  /**
-   * Safe check for auto-seeding on boot
-   */
- // Inside MenuSeederService class:
-
-  /**
-   * Safe check for auto-seeding on boot
-   */
-  public checkAndSeedDemoIfNeeded(): void {
-    const activeTenant = this.tenantContext.currentTenantId();
-
-    if (activeTenant && activeTenant !== 'coffee-shop-demo') {
-      console.log(`⏩ Skipping demo auto-seed for custom store: ${activeTenant}`);
-      return;
-    }
-
-    this.seedCoffeeShopTenant(false);
   }
 
   /**

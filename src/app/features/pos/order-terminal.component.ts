@@ -1,11 +1,10 @@
-import { Component, inject, signal, computed, OnInit } from '@angular/core';
+import { Component, inject, signal, NgZone, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
 import { ThermalPrinterService } from '../../core/services/thermal-printer.service';
 import { TenantContextService } from '../../core/services/tenant-context.service';
-import { MenuSeederService } from '../../core/services/menu-seeder.service';
 import { 
   RestaurantTable, 
   TableOrderItem, 
@@ -29,12 +28,14 @@ export class OrderTerminalComponent implements OnInit {
   private printerService = inject(ThermalPrinterService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
-  private tenantContext = inject(TenantContextService);
-  private menuSeeder = inject(MenuSeederService);
+  private ngZone = inject(NgZone);
+  public tenantContext = inject(TenantContextService);
   public posService = inject(RestaurantPosService);
 
-  // 🔑 CRITICAL: Expose Math to template for Math.max()
   public Math = Math;
+
+  // Concurrency & Processing Guard
+  public isProcessing = signal<boolean>(false);
 
   // Navigation & Search Signals
   public activeTableId = signal<string | null>(null);
@@ -46,11 +47,11 @@ export class OrderTerminalComponent implements OnInit {
   public selectedProductForModifiers = signal<Product | null>(null);
   public selectedModifierOptions = signal<Record<string, string[]>>({});
 
-  // 🔄 Transfer Modal Signals
+  // Transfer Modal Signals
   public showTransferModal = signal<boolean>(false);
   public selectedTargetTableId = signal<string>('');
 
-  // ➗ Bill Splitting Signals
+  // Bill Splitting Signals
   public showSplitBillModal = signal<boolean>(false);
   public splitMode = signal<'ITEMS' | 'EQUAL'>('ITEMS');
   public selectedItemIdsForSplit = signal<string[]>([]);
@@ -64,15 +65,43 @@ export class OrderTerminalComponent implements OnInit {
     this.posService.products().filter(p => p.isPinnedToPOS)
   );
 
+  private currentSlug(): string {
+    return this.tenantContext.currentTenantId() || 'coffee-shop-demo';
+  }
+
+  private getTenantSlug(): string {
+    return this.tenantContext.currentTenantId() || 'coffee-shop-demo';
+  }
+
+  // Authoritative, Tenant-Scoped Active Table
   public activeTable = computed<RestaurantTable | null>(() => {
     const id = this.activeTableId();
     if (!id) return null;
-    return (this.posService.tables().find(t => t.id === id) as RestaurantTable) || null;
+
+    const currentTenant = this.tenantContext.currentTenantId();
+    const currentStore = this.tenantContext.currentStoreId();
+
+    const table = this.posService.tables().find(t => t.id === id);
+    if (!table) return null;
+
+    // Reject cross-tenant or cross-store table bindings
+    if (table.tenantId && table.tenantId !== currentTenant) return null;
+    if (table.storeId && table.storeId !== currentStore) return null;
+
+    return table as RestaurantTable;
   });
 
+  // Transfer options strictly scoped to current tenant/store
   public availableTransferTables = computed(() => {
     const currentId = this.activeTableId();
-    return this.posService.tables().filter(t => t.id !== currentId);
+    const currentTenant = this.tenantContext.currentTenantId();
+    const currentStore = this.tenantContext.currentStoreId();
+
+    return this.posService.tables().filter(t => 
+      t.id !== currentId &&
+      (!t.tenantId || t.tenantId === currentTenant) &&
+      (!t.storeId || t.storeId === currentStore)
+    );
   });
 
   public filteredProducts = computed(() => {
@@ -132,7 +161,7 @@ export class OrderTerminalComponent implements OnInit {
     return Number(total.toFixed(2));
   });
 
-  // --- DEFAULT MODIFIERS ---
+  // Fallback defaults for legacy items lacking explicit group links
   private defaultCoffeeModifiers: ModifierGroup[] = [
     {
       id: 'grp_sweetness',
@@ -211,42 +240,29 @@ export class OrderTerminalComponent implements OnInit {
     }
   ];
 
- // --- SIMPLE / STANDALONE ITEMS EXCLUSION ---
   private isSimpleStandaloneProduct(product: Product): boolean {
     const name = (product.name || '').toLowerCase();
-    // Items that must NEVER have automatic default modifiers:
     return /νερό|nero|water|sparkling|ανθρακούχο|soda|σόδα|cola|fanta|sprite|redbull|χυμό|juice|μπύρα|beer|κρασί|wine|ποτό|drink|vodka|gin|rum|whiskey|κρουασάν|croissant|κέικ|cake|cookie|κουλούρι|μπουγάτσα|τυρόπιτα/i.test(name);
   }
 
-  // --- REFINED FOOD MODIFIERS DETECTOR ---
   private isFoodItemWithModifiers(product: Product): boolean {
     if (this.isSimpleStandaloneProduct(product)) return false;
-
-    // Focus only on customizable food items (Sandwiches, Toasts, Burgers, Club, Crepes, Omelettes)
     const name = (product.name || '').toLowerCase();
     return /τοστ|tost|toast|σάντουιτς|sandwich|burger|club|κλαμπ|μπαγκέτ|baguette|hot dog|ομελέτ|omelet|κρέπ|crepe|τορτίγ|tortilla|wrap/i.test(name);
   }
 
-  // --- REFINED COFFEE / TEA DETECTOR ---
   private isCoffeeItem(product: Product): boolean {
     if (this.isSimpleStandaloneProduct(product)) return false;
-
-    // Check specifically on the product name so broad category names don't trigger on waters/sodas
     const name = (product.name || '').toLowerCase();
     return /espresso|freddo|cappuccino|latte|nescafe|frappe|ελληνικ|φίλτρου|filter|καφέ|coffee|τσάι|tea|σοκολάτα|chocolate/i.test(name);
   }
 
   public getModifierGroupsForProduct(product: Product): ModifierGroup[] {
-    // 1. Explicit modifiers assigned directly to the product
     const allGroups: ModifierGroup[] = this.posService.inventoryService?.modifierGroups?.() || [];
     const matched = allGroups.filter((g: ModifierGroup) => product.modifierGroupIds?.includes(g.id));
 
     if (matched.length > 0) return matched;
-
-    // 2. Never attach default modifiers to simple/packaged items
     if (this.isSimpleStandaloneProduct(product)) return [];
-
-    // 3. Fallback to customizable smart defaults
     if (this.isFoodItemWithModifiers(product)) return this.defaultFoodModifiers;
     if (this.isCoffeeItem(product)) return this.defaultCoffeeModifiers;
 
@@ -259,17 +275,33 @@ export class OrderTerminalComponent implements OnInit {
     return this.getModifierGroupsForProduct(prod);
   });
 
-  ngOnInit(): void {
+ ngOnInit(): void {
+    const slug = this.tenantContext.currentTenantId() || 'coffee-shop-demo';
     const tableId = this.route.snapshot.paramMap.get('tableId');
-    if (tableId) {
-      this.activeTableId.set(tableId);
+
+    // 1. If no tableId in URL, safely route back to floor-plan
+    if (!tableId) {
+      this.router.navigate(['/t', slug, 'floor-plan'], { replaceUrl: true });
+      return;
+    }
+
+    this.activeTableId.set(tableId);
+
+    // 2. Validate table ownership if tables are already loaded in memory
+    const tablesList = this.posService.tables();
+    if (tablesList.length > 0) {
+      const currentTable = this.activeTable();
+      if (!currentTable) {
+        console.warn(`[Security] Unauthorized or non-existent table navigation: ${tableId}`);
+        this.router.navigate(['/t', slug, 'floor-plan'], { replaceUrl: true });
+      }
     }
   }
 
   // --- ACTIONS ---
   public onProductClick(product: Product): void {
     const tableId = this.activeTableId();
-    if (!tableId) return;
+    if (!tableId || this.isProcessing()) return;
 
     const groups = this.getModifierGroupsForProduct(product);
     if (groups.length > 0) {
@@ -359,30 +391,35 @@ export class OrderTerminalComponent implements OnInit {
     return this.pendingItemsCount() > 0;
   }
 
-  public sendOrder(): void {
+  public async sendOrder(): Promise<void> {
     const tableId = this.activeTableId();
-    if (tableId) {
-      this.posService.sendOrderToKitchen(tableId);
+    if (!tableId || this.isProcessing()) return;
+
+    this.isProcessing.set(true);
+    try {
+      await this.posService.sendOrderToKitchen(tableId);
+    } finally {
+      this.isProcessing.set(false);
     }
   }
 
   public adjustItemQuantity(itemId: string, delta: number): void {
     const tableId = this.activeTableId();
-    if (tableId) {
+    if (tableId && !this.isProcessing()) {
       this.posService.updateOrderItemQuantity(tableId, itemId, delta);
     }
   }
 
   public promptVoidItem(item: TableOrderItem): void {
     const tableId = this.activeTableId();
-    if (!tableId) return;
+    if (!tableId || this.isProcessing()) return;
 
     if (item.status === 'PENDING') {
       this.posService.removeOrderItem(tableId, item.id);
     } else {
       const reason = prompt('Αιτιολογία ακύρωσης προϊόντος:');
-      if (reason) {
-        this.posService.voidOrderItem(tableId, item.id, reason);
+      if (reason && reason.trim()) {
+        this.posService.voidOrderItem(tableId, item.id, reason.trim());
       }
     }
   }
@@ -396,7 +433,7 @@ export class OrderTerminalComponent implements OnInit {
 
   public async settlePayment(method: 'CASH' | 'CARD'): Promise<void> {
     const tableId = this.activeTableId();
-    if (!tableId) return;
+    if (!tableId || this.isProcessing()) return;
 
     if (this.hasPendingItems()) {
       alert('⛔ Παρακαλώ πατήστε πρώτα "Αποστολή" στην κουζίνα πριν την είσπραξη!');
@@ -410,12 +447,17 @@ export class OrderTerminalComponent implements OnInit {
       return;
     }
 
+    this.isProcessing.set(true);
     try {
       await this.posService.settleTablePayment(tableId, method);
+      // ✅ MUST use tenant slug
+      this.router.navigate(['/t', this.currentSlug(), 'floor-plan'], { replaceUrl: true });
     } catch (err) {
       console.error('Payment error:', err);
+      alert('Σφάλμα κατά την ολοκλήρωση της πληρωμής.');
+    } finally {
+      this.isProcessing.set(false);
     }
-    this.router.navigate(['/floor-plan'], { replaceUrl: true });
   }
 
   public printBill(): void {
@@ -448,25 +490,54 @@ export class OrderTerminalComponent implements OnInit {
     this.showTransferModal.set(true);
   }
 
- public async confirmTableTransfer(): Promise<void> {
+  public async confirmTableTransfer(): Promise<void> {
     const sourceId = this.activeTableId();
     const targetId = this.selectedTargetTableId();
-    if (!sourceId || !targetId) return;
+    if (!sourceId || !targetId || this.isProcessing()) return;
 
-    // 1. Close modal immediately to prevent UI locking
+    this.isProcessing.set(true);
     this.showTransferModal.set(false);
 
-    // 2. Perform the Firestore transfer
-    const res = await this.posService.moveOrMergeTable(sourceId, targetId);
+    try {
+      const res = await this.posService.moveOrMergeTable(sourceId, targetId);
+      if (res?.success) {
+        this.activeTableId.set(targetId);
+        // ✅ MUST use tenant slug and 'order'
+        await this.router.navigate(['/t', this.currentSlug(), 'order', targetId], { replaceUrl: true });
+      } else {
+        alert('Η μεταφορά του τραπεζιού απέτυχε.');
+      }
+    } catch (err) {
+      console.error('Table transfer error:', err);
+      alert('Σφάλμα κατά τη μεταφορά.');
+    } finally {
+      this.isProcessing.set(false);
+    }
+  }
 
-    if (res.success) {
-      // 3. Update the active table signal directly in place
-      this.activeTableId.set(targetId);
-      
-      // 4. Update the URL without destroying/recreating the component instance
-      window.history.replaceState({}, '', `/order-terminal/${targetId}`);
-    } else {
-      alert(res.message);
+  public async settleSplitItems(method: 'CASH' | 'CARD'): Promise<void> {
+    const tableId = this.activeTableId();
+    const itemIds = this.selectedItemIdsForSplit();
+    if (!tableId || itemIds.length === 0 || this.isProcessing()) return;
+
+    this.isProcessing.set(true);
+    try {
+      const res = await this.posService.settlePartialItems(tableId, itemIds, method);
+      if (res?.success) {
+        this.selectedItemIdsForSplit.set([]);
+        this.showSplitBillModal.set(false);
+        if (res.remainingTotal === 0) {
+          // ✅ MUST use tenant slug
+          this.router.navigate(['/t', this.currentSlug(), 'floor-plan'], { replaceUrl: true });
+        }
+      } else {
+        alert('Σφάλμα κατά τον μερικό διαχωρισμό.');
+      }
+    } catch (err) {
+      console.error('Split settlement error:', err);
+      alert('Σφάλμα κατά την πληρωμή του διαχωρισμού.');
+    } finally {
+      this.isProcessing.set(false);
     }
   }
 
@@ -487,21 +558,6 @@ export class OrderTerminalComponent implements OnInit {
       current.push(itemId);
     }
     this.selectedItemIdsForSplit.set(current);
-  }
-
-  public async settleSplitItems(method: 'CASH' | 'CARD'): Promise<void> {
-    const tableId = this.activeTableId();
-    const itemIds = this.selectedItemIdsForSplit();
-    if (!tableId || itemIds.length === 0) return;
-
-    const res = await this.posService.settlePartialItems(tableId, itemIds, method);
-    if (res.success) {
-      this.selectedItemIdsForSplit.set([]);
-      this.showSplitBillModal.set(false);
-      if (res.remainingTotal === 0) {
-        this.router.navigate(['/floor-plan'], { replaceUrl: true });
-      }
-    }
   }
 
   // --- STYLING HELPERS ---

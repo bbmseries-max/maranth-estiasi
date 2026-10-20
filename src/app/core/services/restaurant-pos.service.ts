@@ -10,6 +10,8 @@ import {
   orderBy,
   limit,
   setDoc, 
+  updateDoc,
+  increment,
   getDocs, 
   deleteDoc, 
   onSnapshot, 
@@ -31,6 +33,7 @@ import {
   Table, 
   DailyZReportSnapshot, 
   AuditLog, 
+  ModifierGroup,
   WaiterVaultSession, 
   SaleRecord, 
   UnitOfMeasure, 
@@ -56,12 +59,7 @@ function cleanUndefined(obj: any): any {
       copy[key] = cleanUndefined(obj[key]);
     }
   }
-  return copy;
-}
-
-function normalizeKey(val?: string | null): string {
-  if (!val) return '';
-  return String(val).trim().toLowerCase().replace(/[\s_-]+/g, '');
+  return copy as any;
 }
 
 @Injectable({
@@ -85,7 +83,7 @@ export class RestaurantPosService {
   public authShiftService = inject(AuthShiftService);
   public tableOrderService = inject(TableOrderService);
 
-  // --- PASS-THROUGH SIGNALS ---
+  // Pass-through Signals
   public rawMaterials = this.inventoryService.rawMaterials;
   public categories = this.inventoryService.categories;
   public products = this.inventoryService.products;
@@ -102,64 +100,55 @@ export class RestaurantPosService {
   public unreadReadyNotifications = this.tableOrderService.unreadReadyNotifications;
   public occupiedTables = this.tableOrderService.occupiedTables;
 
-  // --- FINANCIAL & REPORTING SIGNALS ---
+  // Financial & Reporting Signals
   public allVaultSessions = signal<WaiterVaultSession[]>([]);
   public activeVaultSessions = signal<WaiterVaultSession[]>([]);
   public activeVaultSession = signal<WaiterVaultSession | null>(null);
   public auditLogs = signal<AuditLog[]>([]);
   public zReports = signal<DailyZReportSnapshot[]>([]);
   public salesHistory = signal<SaleRecord[]>([]);
+
   public reserveTable = this.tableOrderService.reserveTable.bind(this.tableOrderService);
   public cancelReservation = this.tableOrderService.cancelReservation.bind(this.tableOrderService);
 
-  // --- TENANT COMPUTATIONS ---
+  // Tenant Computations
   public activeTenantId = computed(() => {
-    return (
-      this.currentEmployee()?.tenantId ||
-      localStorage.getItem('active_tenant_id') ||
-      (this.tenantContext as any)?.currentTenantId?.() ||
-      'coffee-shop-demo'
-    );
+    return this.currentEmployee()?.tenantId || this.tenantContext.currentTenantId();
   });
+
+  private getTenantSlug(): string {
+    return this.tenantContext.currentTenantId() || 'coffee-shop-demo';
+  }
 
   public activeStoreId = computed(() => {
-    return (
-      this.currentEmployee()?.storeId ||
-      localStorage.getItem('active_store_id') ||
-      (this.tenantContext as any)?.currentStoreId?.() ||
-      'store-1'
-    );
+    return this.currentEmployee()?.storeId || this.tenantContext.currentStoreId();
   });
 
-  // --- OCCUPIED TABLES COUNT ---
+  // Occupied Tables Count
   public occupiedTablesCount = computed(() => {
-    const targetTenant = normalizeKey(this.activeTenantId());
-    const tablesList = this.tables();
-    
-    const occupiedFromTables = tablesList.filter(t => {
-      const matchTenant = !t.tenantId || normalizeKey(t.tenantId) === targetTenant;
+    const currentTenant = this.activeTenantId();
+    const currentStore = this.activeStoreId();
+
+    return this.tables().filter(t => {
+      const matchScope = (!t.tenantId || t.tenantId === currentTenant) && (!t.storeId || t.storeId === currentStore);
       const isOccupied = t.status !== 'FREE' && t.status !== 'AVAILABLE';
-      return matchTenant && isOccupied;
+      return matchScope && isOccupied;
     }).length;
-
-    if (occupiedFromTables === 0 && this.activeOrders().length > 0) {
-      return this.activeOrders().length;
-    }
-
-    return occupiedFromTables;
   });
 
-  // --- LIVE FLOOR REVENUE CALCULATION ---
+  // Live Floor Revenue Calculation
   public totalLiveFloorRevenue = computed(() => {
-    const targetTenant = normalizeKey(this.activeTenantId());
+    const currentTenant = this.activeTenantId();
+    const currentStore = this.activeStoreId();
     let total = 0;
 
-    const storeTables = this.tables().filter(t => !t.tenantId || normalizeKey(t.tenantId) === targetTenant);
+    const storeTables = this.tables().filter(t => 
+      (!t.tenantId || t.tenantId === currentTenant) &&
+      (!t.storeId || t.storeId === currentStore)
+    );
 
     for (const table of storeTables) {
-      if (table.status === 'FREE' || table.status === 'AVAILABLE') {
-        continue;
-      }
+      if (table.status === 'FREE' || table.status === 'AVAILABLE') continue;
 
       const orderObj = (table as any).activeOrder || (table as any).currentOrder || (table as any).order;
       const itemsList = orderObj?.items || (table as any).items || [];
@@ -167,9 +156,9 @@ export class RestaurantPosService {
       if (Array.isArray(itemsList) && itemsList.length > 0) {
         for (const item of itemsList) {
           if (item && item.status !== 'VOIDED') {
-            const rawPrice = item.finalItemPrice ?? item.unitPrice ?? item.price ?? item.productPrice ?? 0;
+            const rawPrice = item.finalItemPrice ?? item.unitPrice ?? item.price ?? 0;
             const price = Number(rawPrice) || 0;
-            const qty = Number(item.quantity || item.qty || 1);
+            const qty = Number(item.quantity || 1);
             total += price * qty;
           }
         }
@@ -178,46 +167,27 @@ export class RestaurantPosService {
       }
     }
 
-    if (total === 0 && this.activeOrders().length > 0) {
-      const orders = this.activeOrders().filter(o => !o.tenantId || normalizeKey(o.tenantId) === targetTenant);
-
-      for (const order of orders) {
-        if (Array.isArray(order.items) && order.items.length > 0) {
-          for (const item of order.items) {
-            if (item && item.status !== 'VOIDED') {
-              const rawPrice = item.finalItemPrice ?? item.unitPrice ?? 0;
-              const price = Number(rawPrice) || 0;
-              const qty = Number(item.quantity || 1);
-              total += price * qty;
-            }
-          }
-        } else if (typeof (order as any).total === 'number') {
-          total += Number((order as any).total);
-        }
-      }
-    }
-
     return Number(total.toFixed(2));
   });
 
   public liveFloorRevenue = computed(() => this.totalLiveFloorRevenue());
 
-  // --- FINANCIAL TOTALS COMPUTATIONS ---
+  // Financial Totals
   public totalDailyCashInVaults = computed(() => {
-    return this.allVaultSessions().reduce((acc, v) => acc + (v.cashCollected || 0), 0);
+    return this.activeVaultSessions().reduce((acc, v) => acc + (v.cashCollected || 0), 0);
   });
 
   public totalDailyCardInVaults = computed(() => {
-    return this.allVaultSessions().reduce((acc, v) => acc + (v.cardCollected || 0), 0);
+    return this.activeVaultSessions().reduce((acc, v) => acc + (v.cardCollected || 0), 0);
   });
 
   public totalDailyStartingFloats = computed(() => {
-    return this.allVaultSessions().reduce((acc, v) => acc + (v.startingFloat || 0), 0);
+    return this.activeVaultSessions().reduce((acc, v) => acc + (v.startingFloat || 0), 0);
   });
 
   public totalDailyGrossSales = computed(() => {
     const settledSalesTotal = this.salesHistory().reduce((acc, s) => acc + (s.grandTotal || 0), 0);
-    return settledSalesTotal + this.totalLiveFloorRevenue();
+    return Number((settledSalesTotal + this.totalLiveFloorRevenue()).toFixed(2));
   });
 
   public totalCashInVaults = computed(() => this.totalDailyCashInVaults());
@@ -225,14 +195,13 @@ export class RestaurantPosService {
   public totalStartingFloats = computed(() => this.totalDailyStartingFloats());
   public totalGrossSales = computed(() => this.totalDailyGrossSales());
 
+  // VAT Calculations
   public vatBreakdown = computed(() => {
     let gross13 = 0; let net13 = 0; let vat13 = 0;
     let gross24 = 0; let net24 = 0; let vat24 = 0;
     let gross6 = 0;  let net6 = 0;  let vat6 = 0;
 
-    const sales = this.salesHistory();
-
-    for (const sale of sales) {
+    for (const sale of this.salesHistory()) {
       if (!sale.items || sale.items.length === 0) {
         const gross = sale.grandTotal || 0;
         const net = gross / 1.13;
@@ -304,8 +273,16 @@ export class RestaurantPosService {
     }
   }
 
+  public teardownListeners(): void {
+    if (this.salesUnsub) { this.salesUnsub(); this.salesUnsub = null; }
+    if (this.zReportsUnsub) { this.zReportsUnsub(); this.zReportsUnsub = null; }
+    if (this.auditLogsUnsub) { this.auditLogsUnsub(); this.auditLogsUnsub = null; }
+    if (this.activeVaultsUnsub) { this.activeVaultsUnsub(); this.activeVaultsUnsub = null; }
+  }
+
   public reconnectActiveStoreSync(emp?: Employee): void {
     if (!this.db) return;
+    this.teardownListeners();
     this.inventoryService.initFirestoreSync(this.db);
     this.authShiftService.initFirestoreSync(this.db);
     this.tableOrderService.initFirestoreSync(this.db, () => emp || this.currentEmployee());
@@ -320,46 +297,125 @@ export class RestaurantPosService {
     };
   }
 
-  public async seedDefaultMenuForCurrentStore(): Promise<void> {
-    const { tenantId, storeId } = this.getActiveTenantAndStore();
+  // Financial Listeners (Query-Scoped)
+  public initFinancialListeners(): void {
+    if (!this.db) return;
 
-    const starterCategories = [
-      { id: `${storeId}_cat_coffee`, name: 'Καφέδες & Ροφήματα', code: 'COFFEE', icon: '☕', order: 1, tenantId, storeId },
-      { id: `${storeId}_cat_drinks`, name: 'Αναψυκτικά & Χυμοί', code: 'DRINKS', icon: '🥤', order: 2, tenantId, storeId },
-      { id: `${storeId}_cat_food`, name: 'Σνακ & Φαγητό', code: 'FOOD', icon: '🥪', order: 3, tenantId, storeId },
-      { id: `${storeId}_cat_bar`, name: 'Μπύρες & Ποτά', code: 'BAR', icon: '🍺', order: 4, tenantId, storeId }
-    ];
+    if (this.salesUnsub) this.salesUnsub();
+    if (this.zReportsUnsub) this.zReportsUnsub();
+    if (this.auditLogsUnsub) this.auditLogsUnsub();
 
-    const starterProducts: Product[] = [
-      { id: `${storeId}_prod_1`, name: 'Espresso', price: 1.80, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_2`, name: 'Espresso Double', price: 2.20, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_3`, name: 'Freddo Espresso', price: 2.20, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_4`, name: 'Cappuccino', price: 2.50, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_5`, name: 'Freddo Cappuccino', price: 2.50, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_6`, name: 'Ελληνικός Διπλός', price: 2.00, categoryId: 'cat_coffee', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_7`, name: 'Φυσικός Χυμός Πορτοκάλι', price: 3.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_8`, name: 'Τοστ Γαλοπούλα Τυρί', price: 2.50, categoryId: 'cat_food', station: 'KITCHEN', taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_9`, name: 'Club Sandwich Classic', price: 6.50, categoryId: 'cat_food', station: 'KITCHEN', taxRate: 13, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_10`, name: 'Μπύρα Alfa 330ml', price: 3.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 24, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_11`, name: 'Aperol Spritz', price: 7.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 24, isActive: true, tenantId, storeId },
-      { id: `${storeId}_prod_12`, name: 'Νερό 500ml', price: 0.50, categoryId: 'cat_drinks', station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
-    ];
-    if ((this.inventoryService as any).categories) {
-      (this.inventoryService as any).categories.set(starterCategories);
-    }
-    this.products.update(list => [...list.filter(p => p.storeId !== storeId), ...starterProducts]);
+    const tenantId = this.activeTenantId();
+    const storeId = this.activeStoreId();
 
-    if (this.db) {
-      for (const cat of starterCategories) {
-        await setDoc(doc(this.db, 'categories', cat.id), cleanUndefined(cat), { merge: true }).catch(() => {});
-      }
-      for (const prod of starterProducts) {
-        await setDoc(doc(this.db, 'products', prod.id), cleanUndefined(prod), { merge: true }).catch(() => {});
-      }
-    }
+    // 1. Scoped Sales
+    const salesQuery = query(
+      collection(this.db, 'sales'),
+      where('tenantId', '==', tenantId),
+      where('storeId', '==', storeId)
+    );
+
+    this.salesUnsub = onSnapshot(salesQuery, (snap) => {
+      const list: SaleRecord[] = [];
+      snap.forEach(d => {
+        list.push({ ...(d.data() as SaleRecord), id: d.id });
+      });
+      list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      this.salesHistory.set(list);
+    }, (err) => console.error(`[Firestore/Security] Sales query error for ${tenantId}:`, err));
+
+    // 2. Scoped Z-Reports
+    const zReportsQuery = query(
+      collection(this.db, 'z_reports'),
+      where('tenantId', '==', tenantId),
+      where('storeId', '==', storeId)
+    );
+
+    this.zReportsUnsub = onSnapshot(zReportsQuery, (snap) => {
+      const list: DailyZReportSnapshot[] = [];
+      snap.forEach(d => {
+        list.push({ ...(d.data() as DailyZReportSnapshot), id: d.id });
+      });
+      list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      this.zReports.set(list);
+    }, (err) => console.error(`[Firestore/Security] Z-Reports query error for ${tenantId}:`, err));
+
+    // 3. Scoped Audit Logs
+    const auditQuery = query(
+      collection(this.db, 'auditLogs'),
+      where('tenantId', '==', tenantId),
+      where('storeId', '==', storeId),
+      orderBy('timestamp', 'desc'),
+      limit(100)
+    );
+
+    this.auditLogsUnsub = onSnapshot(auditQuery, (snap) => {
+      const list: AuditLog[] = [];
+      snap.forEach(d => {
+        list.push({ ...(d.data() as AuditLog), id: d.id });
+      });
+      this.auditLogs.set(list);
+    }, (err) => console.error(`[Firestore/Security] Audit logs query error for ${tenantId}:`, err));
   }
 
-  // --- NOTIFICATION DELEGATES ---
+  // Vault Management (Query-Scoped)
+  private initVaultsSync(): void {
+    if (!this.db) return;
+
+    if (this.activeVaultsUnsub) {
+      this.activeVaultsUnsub();
+    }
+
+    const tenantId = this.activeTenantId();
+    const storeId = this.activeStoreId();
+
+    const vaultsQuery = query(
+      collection(this.db, 'vaults'),
+      where('tenantId', '==', tenantId),
+      where('storeId', '==', storeId)
+    );
+
+    this.activeVaultsUnsub = onSnapshot(vaultsQuery, (snap) => {
+      const vaultList: WaiterVaultSession[] = [];
+
+      snap.forEach(docSnap => {
+        const data = docSnap.data() as WaiterVaultSession;
+        vaultList.push({
+          ...data,
+          id: docSnap.id,
+          startingFloat: data.startingFloat ?? 0,
+          cashCollected: data.cashCollected ?? 0,
+          cardCollected: data.cardCollected ?? 0
+        });
+      });
+
+      vaultList.sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
+      this.allVaultSessions.set(vaultList);
+
+      const activeOnly = vaultList.filter(v => v.status === 'OPEN');
+      this.activeVaultSessions.set(activeOnly);
+
+      const emp = this.currentEmployee();
+      if (emp) {
+        const myActiveVault = activeOnly.find(v => v.waiterId === emp.id);
+        this.activeVaultSession.set(myActiveVault || null);
+
+        const isFloorStaff = (emp.role || '').toUpperCase() === 'WAITER';
+        if (isFloorStaff && !myActiveVault && !this.isInitialVaultsSync) {
+          console.warn(`[Vault] Active vault closed for ${emp.name}. Terminating session.`);
+          this.logoutEmployee();
+        }
+      } else {
+        this.activeVaultSession.set(null);
+      }
+
+      if (this.isInitialVaultsSync) {
+        this.isInitialVaultsSync = false;
+      }
+    }, (err) => console.error(`[Firestore/Security] Vaults sync error for ${tenantId}:`, err));
+  }
+
+  // Notification Delegates
   public clearAllNotifications(): void {
     this.tableOrderService.clearAllNotifications();
   }
@@ -368,21 +424,7 @@ export class RestaurantPosService {
     this.tableOrderService.dismissNotification(idOrIndex);
   }
 
-  // 1. Computed list of pinned items
-  public pinnedProducts = computed(() => 
-    this.products().filter(p => p.isPinnedToPOS === true)
-  );
-
-  // 2. 1-tap Toggle method for Admin/Manager
-  public toggleProductPinned(productId: string): void {
-    this.products.update(list => 
-      list.map(prod => 
-        prod.id === productId ? { ...prod, isPinnedToPOS: !prod.isPinnedToPOS } : prod
-      )
-    );
-  }
-
-  // --- AUTH & STAFF DELEGATES ---
+  // Staff and Authentication Delegates
   public async loginWithPin(pin: string): Promise<Employee | null> {
     const result: any = await this.authShiftService.loginWithPin(pin);
     const emp: Employee | null = result?.employee || (result?.id ? result : null);
@@ -392,25 +434,16 @@ export class RestaurantPosService {
   public setLoggedInEmployee(emp: Employee, customFloat: number = 0): void {
     this.tableOrderService.clearAllNotifications();
     this.authShiftService.setLoggedInEmployee(emp);
-    
-    localStorage.setItem('current_employee', JSON.stringify(emp));
-    localStorage.setItem('maranth_pos_employee', JSON.stringify(emp));
 
+    localStorage.setItem('current_employee', JSON.stringify(emp));
     if (emp.tenantId) localStorage.setItem('active_tenant_id', emp.tenantId);
     if (emp.storeId) localStorage.setItem('active_store_id', emp.storeId);
 
     this.reconnectActiveStoreSync(emp);
     this.logAudit('CLOCK_IN', `Είσοδος στο σύστημα (${emp.name} - ${emp.role})`);
 
-    const cleanPin = (emp.pinCode || emp.pin || '').trim();
-    
-    const existingVault = this.allVaultSessions().find(
-      v => (
-        v.waiterId === emp.id || 
-        v.waiterId === cleanPin || 
-        v.waiterName === emp.name || 
-        (v.waiterId && cleanPin && v.waiterId.includes(cleanPin))
-      ) && v.status === 'OPEN'
+    const existingVault = this.activeVaultSessions().find(
+      v => v.waiterId === emp.id && v.status === 'OPEN'
     );
 
     if (existingVault) {
@@ -421,18 +454,14 @@ export class RestaurantPosService {
   }
 
   public logoutEmployee(): void {
-    // 1. Clear all local storage & session tokens
     localStorage.removeItem('current_employee');
     localStorage.removeItem('maranth_pos_employee');
-    sessionStorage.removeItem('current_employee');
     sessionStorage.clear();
 
-    // 2. Run inside NgZone to force Angular to update the route immediately
     this.ngZone.run(() => {
       this.authShiftService.currentEmployee.set(null);
       this.authShiftService.activeWorkShift.set(null);
       this.activeVaultSession.set(null);
-
       this.router.navigate(['/login'], { replaceUrl: true });
     });
   }
@@ -476,398 +505,7 @@ export class RestaurantPosService {
     }
   }
 
-  // --- CATEGORIES & PRODUCTS DELEGATES ---
-  public addCategory(name: string, icon: string = '📁') {
-    return this.inventoryService.addCategory(name, icon);
-  }
-
-  public deleteCategory(catId: string) {
-    return this.inventoryService.deleteCategory(catId);
-  }
-
-  public addProduct(prodData: { name: string; categoryId: string; price: number; purchasePrice?: number; taxRate: GreekVatRate; isPinnedToPOS?: boolean }) {
-    return this.inventoryService.addProduct(prodData);
-  }
-
-  public updateProduct(prodId: string, prodData: Partial<Product>) {
-    return this.inventoryService.updateProduct(prodId, prodData);
-  }
-
-  public deleteProduct(prodId: string) {
-    return this.inventoryService.deleteProduct(prodId);
-  }
-
-  // --- FINANCIAL & REPORTING LISTENERS ---
-  public initFinancialListeners(): void {
-    if (!this.db) return;
-
-    if (this.salesUnsub) this.salesUnsub();
-    if (this.zReportsUnsub) this.zReportsUnsub();
-    if (this.auditLogsUnsub) this.auditLogsUnsub();
-
-    const rawTenantId = this.activeTenantId();
-    const rawStoreId = this.activeStoreId();
-
-    const targetTenant = normalizeKey(rawTenantId);
-    const targetStore = normalizeKey(rawStoreId);
-
-    // 1. Sync Sales History
-    this.salesUnsub = onSnapshot(collection(this.db, 'sales'), (snap) => {
-      const list: SaleRecord[] = [];
-      snap.forEach(d => {
-        const data = d.data() as SaleRecord;
-        const dTenant = normalizeKey(data.tenantId);
-        const dStore = normalizeKey(data.storeId);
-
-        const matchTenant = dTenant === targetTenant;
-        const matchStore = dStore === targetStore;
-
-        if (matchTenant && matchStore) {
-          list.push({ ...data, id: d.id });
-        }
-      });
-      list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      this.salesHistory.set(list);
-    }, (err) => console.warn('Sales listener:', err));
-
-    // 2. Sync Z-Reports
-    this.zReportsUnsub = onSnapshot(collection(this.db, 'z_reports'), (snap) => {
-      const list: DailyZReportSnapshot[] = [];
-      snap.forEach(d => {
-        const data = d.data() as DailyZReportSnapshot;
-        const dTenant = normalizeKey(data.tenantId);
-        const dStore = normalizeKey(data.storeId);
-
-        const matchTenant = dTenant === targetTenant;
-        const matchStore = dStore === targetStore;
-
-        if (matchTenant && matchStore) {
-          list.push({ ...data, id: d.id });
-        }
-      });
-      list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      this.zReports.set(list);
-    }, (err) => console.warn('Z-Reports listener:', err));
-
-    // 3. Sync Audit Logs (Filtered strictly by tenantId AND storeId)
-    const auditQuery = query(
-      collection(this.db, 'auditLogs'),
-      where('tenantId', '==', rawTenantId),
-      where('storeId', '==', rawStoreId),
-      orderBy('timestamp', 'desc'),
-      limit(100)
-    );
-
-    this.auditLogsUnsub = onSnapshot(
-      auditQuery,
-      (snap) => {
-        const list: AuditLog[] = [];
-        snap.forEach(d => {
-          const data = d.data() as AuditLog;
-          list.push({ ...data, id: d.id });
-        });
-        
-        list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        this.auditLogs.set(list);
-      },
-      (err) => {
-        console.warn('Audit logs compound index pending, applying client-side strict filter:', err);
-        // Fallback without Firestore composite index requirement
-        const fallbackQuery = query(
-          collection(this.db, 'auditLogs'),
-          limit(300)
-        );
-
-        this.auditLogsUnsub = onSnapshot(fallbackQuery, (fallbackSnap) => {
-          const fallbackList: AuditLog[] = [];
-          fallbackSnap.forEach(d => {
-            const data = d.data() as AuditLog;
-            const dTenant = normalizeKey(data.tenantId);
-            const dStore = normalizeKey(data.storeId);
-
-            // Strict matching: do NOT accept empty or 'all' across unrelated stores
-            const matchTenant = dTenant === targetTenant;
-            const matchStore = dStore === targetStore;
-
-            if (matchTenant && matchStore) {
-              fallbackList.push({ ...data, id: d.id });
-            }
-          });
-
-          fallbackList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-          this.auditLogs.set(fallbackList.slice(0, 100));
-        });
-      }
-    );
-  }
-
-  public addRawMaterial(data: { name: string; unit: UnitOfMeasure; currentStock: number; minAlertStock: number; costPerUnit: number }) {
-    return this.inventoryService.addRawMaterial(data);
-  }
-
-  public updateRawMaterial(id: string, data: Partial<any>) {
-    return this.inventoryService.updateRawMaterial(id, data);
-  }
-
-  public adjustRawMaterialStock(id: string, count: number, reason?: string) {
-    return this.inventoryService.adjustRawMaterialStock(id, count, reason);
-  }
-
-  public deleteRawMaterial(id: string) {
-    return this.inventoryService.deleteRawMaterial(id);
-  }
-
-  public recordGoodsReceiving(data: any) {
-    return this.inventoryService.recordGoodsReceiving(data);
-  }
-
-  public logSpoilage(data: any) {
-    return this.inventoryService.logSpoilage(data, this.currentEmployee());
-  }
-
-  public deductRecipeIngredients(prod: Product, mult?: number) {
-    return this.inventoryService.deductRecipeIngredients(prod, mult);
-  }
-
-  // --- TABLE & FLOOR PLAN DELEGATES ---
-  public addProductToTableOrder(tableId: string, product: Product, modifiers: OrderModifier[] = [], notes: string = ''): void {
-    this.addOrderItemToTable(tableId, product, modifiers, notes);
-  }
-
-  public removeOrderItem(tableId: string, itemId: string): void {
-    this.tableOrderService.removeOrderItem(tableId, itemId);
-  }
-
-  public updateOrderItemQuantity(tableId: string, itemId: string, delta: number): void {
-    this.tableOrderService.updateTableOrderItemQuantity(tableId, itemId, delta);
-  }
-
-  public voidOrderItem(tableId: string, itemId: string, reason?: string): void {
-    this.tableOrderService.voidTableOrderItem(tableId, itemId, reason);
-  }
-
-  public updateOrderNotes(tableId: string, notes: string): void {
-    const table = this.tables().find(t => t.id === tableId);
-    if (table && table.activeOrder) {
-      this.tableOrderService.updateTable(tableId, {
-        activeOrder: {
-          ...table.activeOrder,
-          notes
-        }
-      });
-    }
-  }
-
-  public printTableBill(tableId: string): void {
-    this.markTableBillPrinted(tableId);
-  }
-
-  public addTable(data: { number: string | number; seats?: number; section?: string; zone?: string }) {
-    return this.tableOrderService.addTable(data);
-  }
-
-  public updateTable(tableId: string, data: Partial<Table>) {
-    return this.tableOrderService.updateTable(tableId, data);
-  }
-
-  public deleteTable(tableId: string) {
-    return this.tableOrderService.deleteTable(tableId);
-  }
-
-  public addOrderItemToTable(tableId: string, product: Product, modifiers: OrderModifier[] = [], notes: string = '', waiter?: Employee | null): void {
-    const activeWaiter = waiter || this.currentEmployee();
-    return this.tableOrderService.addOrderItemToTable(tableId, product, modifiers, notes, activeWaiter);
-  }
-
-  public updateTableOrderItemQuantity(tableId: string, itemId: string, delta: number) {
-    return this.tableOrderService.updateTableOrderItemQuantity(tableId, itemId, delta);
-  }
-
-  public voidTableOrderItem(tableId: string, itemId: string, reason?: string) {
-    return this.tableOrderService.voidTableOrderItem(tableId, itemId, reason);
-  }
-
-  public sendOrderToKitchen(tableId: string) {
-    return this.tableOrderService.sendOrderToKitchen(tableId);
-  }
-
-  public bumpOrderItemStatus(tableId: string, itemId: string) {
-    return this.tableOrderService.bumpOrderItemStatus(tableId, itemId);
-  }
-
-  public completeKitchenTicket(orderId: string, tableId: string) {
-    const table = this.tables().find(t => t.id === tableId);
-    if (table && table.activeOrder) {
-      const updatedItems = table.activeOrder.items.map(i => ({ ...i, status: 'SERVED' as ItemPreparationStatus }));
-      this.tableOrderService.updateTable(tableId, { activeOrder: { ...table.activeOrder, items: updatedItems } });
-    }
-  }
-
-  public markTableBillPrinted(tableId: string) {
-    return this.tableOrderService.markTableBillPrinted(tableId);
-  }
-
-  public async settleTablePayment(
-    tableId: string, 
-    paymentMethod: 'CASH' | 'CARD' | 'DEBT',
-    targetWaiterVaultId?: string
-  ): Promise<void> {
-    const currentEmp = this.currentEmployee();
-
-    // ⛔ GUARD 1: Block unauthenticated users
-    if (!currentEmp) {
-      alert('⚠️ Δεν υπάρχει συνδεδεμένος χρήστης. Παρακαλώ συνδεθείτε με το PIN σας.');
-      this.logoutEmployee();
-      return;
-    }
-
-    const table = this.tables().find(t => t.id === tableId);
-    const activeOrder = table?.activeOrder;
-
-    // ⛔ GUARD 2: Kitchen Unsent Items Check
-    if (activeOrder && activeOrder.items) {
-      const unsentItems = activeOrder.items.filter(item => item.status === 'PENDING');
-      if (unsentItems.length > 0) {
-        alert(
-          `⚠️ Υπάρχουν ${unsentItems.length} προϊόντα που δεν έχουν σταλεί στην κουζίνα!\n\nΠαρακαλώ πατήστε "Αποστολή" στην κουζίνα πριν την εξόφληση.`
-        );
-        return;
-      }
-    }
-
-    // ⛔ GUARD 3: Resolve Target Open Vault
-    const activeVaults = this.activeVaultSessions();
-    let targetVault: WaiterVaultSession | null | undefined = targetWaiterVaultId 
-      ? activeVaults.find(v => v.id === targetWaiterVaultId && v.status === 'OPEN')
-      : activeVaults.find(v => v.waiterId === currentEmp.id && v.status === 'OPEN')
-        || activeVaults.find(v => v.waiterName === currentEmp.name && v.status === 'OPEN')
-        || this.activeVaultSession();
-
-    if (!targetVault && activeVaults.length > 0) {
-      targetVault = activeVaults[0];
-    }
-
-    if (!targetVault) {
-      alert('⚠️ Δεν βρέθηκε ενεργό ανοιχτό ταμείο για την καταχώρηση της είσπραξης. Παρακαλώ ανοίξτε ταμείο/βάρδια.');
-      return;
-    }
-
-    // Deduct stock for settled items
-    if (activeOrder && activeOrder.items) {
-      activeOrder.items.forEach(orderItem => {
-        const matchingProd = this.products().find(p => p.id === orderItem.productId);
-        if (matchingProd) {
-          this.deductRecipeIngredients(matchingProd, orderItem.quantity);
-        }
-      });
-    }
-    
-    return this.tableOrderService.settleTablePayment(tableId, paymentMethod, currentEmp, (sale) => {
-      const addedCash = paymentMethod === 'CASH' ? (sale.grandTotal || 0) : 0;
-      const addedCard = paymentMethod === 'CARD' ? (sale.grandTotal || 0) : 0;
-
-      const updatedVault: WaiterVaultSession = {
-        ...targetVault!,
-        cashCollected: Number(((targetVault!.cashCollected || 0) + addedCash).toFixed(2)),
-        cardCollected: Number(((targetVault!.cardCollected || 0) + addedCard).toFixed(2))
-      };
-
-      this.allVaultSessions.update(list => list.map(v => v.id === targetVault!.id ? updatedVault : v));
-      this.activeVaultSessions.update(list => list.map(v => v.id === targetVault!.id ? updatedVault : v));
-      
-      if (this.activeVaultSession()?.id === targetVault!.id) {
-        this.activeVaultSession.set(updatedVault);
-      }
-
-      if (this.db) {
-        setDoc(doc(this.db, 'vaults', targetVault!.id), cleanUndefined(updatedVault), { merge: true }).catch(() => {});
-      }
-
-      this.logAudit(
-        'PAYMENT_RECEIVED', 
-        `Εξόφληση €${sale.grandTotal.toFixed(2)} (${paymentMethod}) - Τραπέζι #${sale.tableNumber} [Ταμείο: ${targetVault!.waiterName}]`, 
-        sale.tableNumber
-      );
-    });
-  }
-
-  // --- VAULT MANAGEMENT DELEGATES ---
-  private initVaultsSync(): void {
-    if (!this.db) return;
-
-    if (this.activeVaultsUnsub) {
-      this.activeVaultsUnsub();
-    }
-
-    this.activeVaultsUnsub = onSnapshot(collection(this.db, 'vaults'), (snap) => {
-      const vaultList: WaiterVaultSession[] = [];
-      const targetTenant = normalizeKey(this.activeTenantId());
-      const targetStore = normalizeKey(this.activeStoreId());
-
-      snap.forEach(docSnap => {
-        const data = docSnap.data() as WaiterVaultSession;
-        const vaultId = data.id || docSnap.id;
-        
-        const docTenant = normalizeKey(data.tenantId);
-        const docStore = normalizeKey(data.storeId);
-
-        const matchesTenant = !docTenant || docTenant === targetTenant;
-        const matchesStore = !docStore || docStore === targetStore || docStore === 'all';
-
-        if (matchesTenant && matchesStore) {
-          vaultList.push({
-            ...data,
-            id: vaultId,
-            tenantId: data.tenantId || this.activeTenantId(),
-            storeId: data.storeId || this.activeStoreId(),
-            startingFloat: data.startingFloat ?? (data as any).startingCash ?? 0,
-            cashCollected: data.cashCollected ?? 0,
-            cardCollected: data.cardCollected ?? 0
-          });
-        }
-      });
-
-      vaultList.sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
-
-      this.allVaultSessions.set(vaultList);
-
-      const activeOnly = vaultList.filter(v => v.status === 'OPEN');
-      this.activeVaultSessions.set(activeOnly);
-
-      const emp = this.currentEmployee();
-      if (emp) {
-        const cleanPin = (emp.pinCode || emp.pin || '').trim();
-        const empId = String(emp.id || '').trim();
-        const empName = String(emp.name || '').trim().toLowerCase();
-
-        const myActiveVault = activeOnly.find(v => 
-          v.waiterId === empId || 
-          v.waiterId === cleanPin || 
-          v.waiterName?.toLowerCase() === empName || 
-          (v.waiterId && cleanPin && v.waiterId.includes(cleanPin))
-        );
-
-        this.activeVaultSession.set(myActiveVault || null);
-
-        // 🚨 REMOTE KICK-OUT GUARD:
-        const role = (emp.role || '').toUpperCase();
-        const isFloorStaff = role === 'WAITER';
-
-        if (isFloorStaff && !myActiveVault && !this.isInitialVaultsSync) {
-          console.warn(`🔒 Active vault for ${emp.name} was closed. Logging out device...`);
-          this.logoutEmployee();
-        }
-      } else {
-        this.activeVaultSession.set(null);
-      }
-
-      // Mark initial load as completed
-      if (this.isInitialVaultsSync) {
-        this.isInitialVaultsSync = false;
-      }
-    }, (err) => console.warn('Vaults listener error:', err));
-  }
-
+  // Vault Helpers
   public openWaiterVault(startingFloat: number = 0, targetEmp?: Employee | null): void {
     const emp = targetEmp || this.currentEmployee();
     if (!emp) return;
@@ -875,17 +513,11 @@ export class RestaurantPosService {
     const tenantId = emp.tenantId || this.activeTenantId();
     const storeId = emp.storeId || this.activeStoreId();
     const cleanFloat = Math.max(0, startingFloat);
-    const cleanPin = (emp.pinCode || emp.pin || '').trim();
 
     const existingOpenVault = this.activeVaultSessions().find(
-      v => (
-        v.waiterId === emp.id || 
-        v.waiterId === cleanPin || 
-        v.waiterName === emp.name || 
-        (v.waiterId && cleanPin && v.waiterId.includes(cleanPin))
-      ) && v.status === 'OPEN'
+      v => v.waiterId === emp.id && v.status === 'OPEN'
     );
-    
+
     if (existingOpenVault) {
       this.activeVaultSession.set(existingOpenVault);
       return;
@@ -893,8 +525,8 @@ export class RestaurantPosService {
 
     const vault: WaiterVaultSession = {
       id: `VAULT-${emp.id}-${Date.now()}`,
-      tenantId: tenantId,
-      storeId: storeId,
+      tenantId,
+      storeId,
       shiftLogId: `SHIFT-${emp.id}-${Date.now()}`,
       waiterId: emp.id,
       waiterName: emp.name,
@@ -906,12 +538,12 @@ export class RestaurantPosService {
     };
 
     this.activeVaultSession.set(vault);
-    this.activeVaultSessions.update(list => [vault, ...list.filter(v => v.waiterId !== emp.id && v.id !== vault.id)]);
+    this.activeVaultSessions.update(list => [vault, ...list.filter(v => v.waiterId !== emp.id)]);
     this.allVaultSessions.update(list => [vault, ...list.filter(v => v.id !== vault.id)]);
 
     if (this.db) {
       setDoc(doc(this.db, 'vaults', vault.id), cleanUndefined(vault), { merge: true }).catch(err => {
-        console.error('Error opening vault in Firestore:', err);
+        console.error('Error writing vault to Firestore:', err);
       });
     }
 
@@ -942,26 +574,6 @@ export class RestaurantPosService {
     this.logAudit('VAULT_FLOAT_UPDATED', `Αλλαγή αρχικού ταμείου (${vault.waiterName}): €${cleanFloat.toFixed(2)}`);
   }
 
-  public closeWaiterVault(vaultId: string, actualCashCounted: number, notes: string = ''): void {
-    const vault = this.allVaultSessions().find(v => v.id === vaultId);
-    if (!vault) return;
-
-    const expectedTotalCash = vault.startingFloat + vault.cashCollected;
-    const variance = actualCashCounted - expectedTotalCash;
-
-    const closedVault: WaiterVaultSession = {
-      ...vault,
-      status: 'CLOSED',
-      closedAt: new Date().toISOString(),
-      expectedCash: expectedTotalCash,
-      cashHandedOver: actualCashCounted,
-      cashVariance: variance,
-      notes
-    };
-
-    this.closeWaiterVaultSession(closedVault);
-  }
-
   public getEmployeeOpenVault(empIdOrPin: string): WaiterVaultSession | undefined {
     if (!empIdOrPin) return undefined;
     const target = String(empIdOrPin).trim().toLowerCase();
@@ -978,7 +590,6 @@ export class RestaurantPosService {
     const nowStr = new Date().toISOString();
     const currentEmp = this.currentEmployee();
 
-    // 1. Calculate & lock financial figures
     const startFloat = closedSession.startingFloat || 0;
     const cash = closedSession.cashCollected || 0;
     const card = closedSession.cardCollected || 0;
@@ -995,28 +606,22 @@ export class RestaurantPosService {
       cashVariance: variance
     };
 
-    // 2. Update local state
     this.activeVaultSessions.update(list => list.filter(v => v.id !== closedSession.id));
     this.allVaultSessions.update(list => list.map(v => v.id === closedSession.id ? finalizedVault : v));
-    
+
     if (this.activeVaultSession()?.id === closedSession.id) {
       this.activeVaultSession.set(null);
     }
 
-    // 3. Persist to Firestore
     if (this.db && closedSession.id) {
-      try {
-        await setDoc(doc(this.db, 'vaults', closedSession.id), cleanUndefined(finalizedVault), { merge: true });
-      } catch (err) {
-        console.error('Error saving closed vault to Firestore:', err);
-      }
+      await setDoc(doc(this.db, 'vaults', closedSession.id), cleanUndefined(finalizedVault), { merge: true }).catch(err => {
+        console.error('Error saving closed vault:', err);
+      });
     }
 
-    // 4. Save full financial summary directly to shift document
-    const targetEmpId = closedSession.waiterId || closedSession.waiterName;
     await this.authShiftService.clockOutEmployeeShift(
-      targetEmpId, 
-      `Κλείσιμο ταμείου (${closedSession.waiterName}) - Μετρητά: €${cash.toFixed(2)}, Κάρτες: €${card.toFixed(2)}, Παράδοση: €${handedOver.toFixed(2)}`,
+      closedSession.waiterId, 
+      `Κλείσιμο ταμείου (${closedSession.waiterName})`,
       {
         startingFloat: startFloat,
         cashCollected: cash,
@@ -1030,22 +635,373 @@ export class RestaurantPosService {
 
     this.logAudit(
       'VAULT_CLOSED', 
-      `Κλείσιμο ταμείου (${closedSession.waiterName}): Μετρητά €${cash.toFixed(2)}, Κάρτες €${card.toFixed(2)}. Παράδοση: €${handedOver.toFixed(2)}`
+      `Κλείσιμο ταμείου (${closedSession.waiterName}): Παράδοση €${handedOver.toFixed(2)}`
     );
 
-    // 5. Hard logout if active user closed their own shift
-    if (currentEmp) {
-      const currentEmpId = String(currentEmp.id || '').trim().toLowerCase();
-      const currentEmpPin = String(currentEmp.pin || currentEmp.pinCode || '').trim().toLowerCase();
-      const vaultWaiterId = String(closedSession.waiterId || '').trim().toLowerCase();
+    if (currentEmp && currentEmp.id === closedSession.waiterId) {
+      this.logoutEmployee();
+    }
+  }
 
-      const isClosingOwnVault = 
-        (vaultWaiterId && (vaultWaiterId === currentEmpId || vaultWaiterId === currentEmpPin));
+  // Inventory & Menu Delegates
+  public addCategory(name: string, icon: string = '📁') {
+    return this.inventoryService.addCategory(name, icon);
+  }
 
-      if (isClosingOwnVault) {
-        this.logoutEmployee();
+  public deleteCategory(catId: string) {
+    return this.inventoryService.deleteCategory(catId);
+  }
+
+  public addProduct(prodData: { name: string; categoryId: string; price: number; purchasePrice?: number; taxRate: GreekVatRate; isPinnedToPOS?: boolean }) {
+    return this.inventoryService.addProduct(prodData);
+  }
+
+  public updateProduct(prodId: string, prodData: Partial<Product>) {
+    return this.inventoryService.updateProduct(prodId, prodData);
+  }
+
+  public deleteProduct(prodId: string) {
+    return this.inventoryService.deleteProduct(prodId);
+  }
+
+  public addRawMaterial(data: { name: string; unit: UnitOfMeasure; currentStock: number; minAlertStock: number; costPerUnit: number }) {
+    return this.inventoryService.addRawMaterial(data);
+  }
+
+  public updateRawMaterial(id: string, data: Partial<any>) {
+    return this.inventoryService.updateRawMaterial(id, data);
+  }
+
+  public adjustRawMaterialStock(id: string, count: number, reason?: string) {
+    return this.inventoryService.adjustRawMaterialStock(id, count, reason);
+  }
+
+  public deleteRawMaterial(id: string) {
+    return this.inventoryService.deleteRawMaterial(id);
+  }
+
+  public recordGoodsReceiving(data: any) {
+    return this.inventoryService.recordGoodsReceiving(data);
+  }
+
+  public logSpoilage(data: any) {
+    return this.inventoryService.logSpoilage(data, this.currentEmployee());
+  }
+
+  public deductRecipeIngredients(prod: Product, mult?: number) {
+    return this.inventoryService.deductRecipeIngredients(prod, mult);
+  }
+
+  public async seedDefaultMenuForCurrentStore(): Promise<void> {
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+
+    // 1. Categories
+    const starterCategories = [
+      { id: `${storeId}_cat_coffee`, name: 'Καφέδες & Ροφήματα', code: 'COFFEE', icon: '☕', order: 1, tenantId, storeId },
+      { id: `${storeId}_cat_drinks`, name: 'Αναψυκτικά & Χυμοί', code: 'DRINKS', icon: '🥤', order: 2, tenantId, storeId },
+      { id: `${storeId}_cat_food`, name: 'Σνακ & Φαγητό', code: 'FOOD', icon: '🥪', order: 3, tenantId, storeId },
+      { id: `${storeId}_cat_bar`, name: 'Μπύρες & Ποτά', code: 'BAR', icon: '🍺', order: 4, tenantId, storeId }
+    ];
+
+    // 2. Tenant-Scoped Modifier Groups (Matching your ModifierGroup & ModifierOption interfaces)
+    const sweetnessGroupId = `${storeId}_modgrp_sweetness`;
+    const milkGroupId = `${storeId}_modgrp_milk`;
+    const coffeeExtrasGroupId = `${storeId}_modgrp_coffee_extras`;
+    const breadGroupId = `${storeId}_modgrp_bread`;
+    const toastExtrasGroupId = `${storeId}_modgrp_toast_extras`;
+
+    const starterModifierGroups: ModifierGroup[] = [
+      {
+        id: sweetnessGroupId,
+        tenantId,
+        storeId,
+        name: 'Γλυκύτητα',
+        required: true,
+        minSelect: 1,
+        maxSelect: 1,
+        minSelections: 1,
+        maxSelections: 1,
+        options: [
+          { id: `${storeId}_opt_sketos`, tenantId, storeId, name: 'Σκέτος', priceExtra: 0, available: true },
+          { id: `${storeId}_opt_metrios`, tenantId, storeId, name: 'Μέτριος', priceExtra: 0, available: true },
+          { id: `${storeId}_opt_glykos`, tenantId, storeId, name: 'Γλυκός', priceExtra: 0, available: true },
+          { id: `${storeId}_opt_stevia`, tenantId, storeId, name: 'Με Στέβια', priceExtra: 0, available: true }
+        ]
+      },
+      {
+        id: milkGroupId,
+        tenantId,
+        storeId,
+        name: 'Είδος Γάλακτος',
+        required: false,
+        minSelect: 0,
+        maxSelect: 1,
+        minSelections: 0,
+        maxSelections: 1,
+        options: [
+          { id: `${storeId}_opt_regular_milk`, tenantId, storeId, name: 'Κανονικό Γάλα', priceExtra: 0, available: true },
+          { id: `${storeId}_opt_oat_milk`, tenantId, storeId, name: 'Βρώμης (Oat)', priceExtra: 0.50, available: true },
+          { id: `${storeId}_opt_almond_milk`, tenantId, storeId, name: 'Αμυγδάλου', priceExtra: 0.50, available: true }
+        ]
+      },
+      {
+        id: coffeeExtrasGroupId,
+        tenantId,
+        storeId,
+        name: 'Επιπλέον Καφέ',
+        required: false,
+        minSelect: 0,
+        maxSelect: 3,
+        minSelections: 0,
+        maxSelections: 3,
+        options: [
+          { id: `${storeId}_opt_decaf`, tenantId, storeId, name: 'Decaf', priceExtra: 0, available: true },
+          { id: `${storeId}_opt_extra_shot`, tenantId, storeId, name: 'Extra Shot Espresso', priceExtra: 0.60, available: true },
+          { id: `${storeId}_opt_syrup_vanilla`, tenantId, storeId, name: 'Σιρόπι Βανίλια', priceExtra: 0.40, available: true },
+          { id: `${storeId}_opt_syrup_caramel`, tenantId, storeId, name: 'Σιρόπι Καραμέλα', priceExtra: 0.40, available: true }
+        ]
+      },
+      {
+        id: breadGroupId,
+        tenantId,
+        storeId,
+        name: 'Είδος Ψωμιού',
+        required: true,
+        minSelect: 1,
+        maxSelect: 1,
+        minSelections: 1,
+        maxSelections: 1,
+        options: [
+          { id: `${storeId}_opt_bread_white`, tenantId, storeId, name: 'Λευκό Ψωμί', priceExtra: 0, available: true },
+          { id: `${storeId}_opt_bread_dark`, tenantId, storeId, name: 'Ψωμί Ολικής', priceExtra: 0, available: true },
+          { id: `${storeId}_opt_bread_brioche`, tenantId, storeId, name: 'Brioche', priceExtra: 0.50, available: true }
+        ]
+      },
+      {
+        id: toastExtrasGroupId,
+        tenantId,
+        storeId,
+        name: 'Extra Προσθήκες',
+        required: false,
+        minSelect: 0,
+        maxSelect: 4,
+        minSelections: 0,
+        maxSelections: 4,
+        options: [
+          { id: `${storeId}_opt_extra_bacon`, tenantId, storeId, name: 'Extra Μπέικον', priceExtra: 0.60, available: true },
+          { id: `${storeId}_opt_extra_cheese`, tenantId, storeId, name: 'Extra Τυρί', priceExtra: 0.50, available: true },
+          { id: `${storeId}_opt_mayo`, tenantId, storeId, name: 'Μαγιονέζα', priceExtra: 0.30, available: true },
+          { id: `${storeId}_opt_egg`, tenantId, storeId, name: 'Αυγό Τηγανητό', priceExtra: 0.80, available: true }
+        ]
+      }
+    ];
+
+    // Groups linked specifically to coffee and food products:
+    const coffeeGroupIds = [sweetnessGroupId, milkGroupId, coffeeExtrasGroupId];
+    const foodGroupIds = [breadGroupId, toastExtrasGroupId];
+
+    // 3. Products with explicit modifierGroupIds linkage
+    const starterProducts: Product[] = [
+      { id: `${storeId}_prod_1`, name: 'Espresso', price: 1.80, categoryId: `${storeId}_cat_coffee`, station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId, modifierGroupIds: coffeeGroupIds },
+      { id: `${storeId}_prod_2`, name: 'Espresso Double', price: 2.20, categoryId: `${storeId}_cat_coffee`, station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId, modifierGroupIds: coffeeGroupIds },
+      { id: `${storeId}_prod_3`, name: 'Freddo Espresso', price: 2.20, categoryId: `${storeId}_cat_coffee`, station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId, modifierGroupIds: coffeeGroupIds },
+      { id: `${storeId}_prod_4`, name: 'Cappuccino', price: 2.50, categoryId: `${storeId}_cat_coffee`, station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId, modifierGroupIds: coffeeGroupIds },
+      { id: `${storeId}_prod_5`, name: 'Freddo Cappuccino', price: 2.50, categoryId: `${storeId}_cat_coffee`, station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId, modifierGroupIds: coffeeGroupIds },
+      { id: `${storeId}_prod_6`, name: 'Ελληνικός Διπλός', price: 2.00, categoryId: `${storeId}_cat_coffee`, station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId, modifierGroupIds: [sweetnessGroupId] },
+      { id: `${storeId}_prod_7`, name: 'Φυσικός Χυμός Πορτοκάλι', price: 3.50, categoryId: `${storeId}_cat_drinks`, station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_8`, name: 'Τοστ Γαλοπούλα Τυρί', price: 2.50, categoryId: `${storeId}_cat_food`, station: 'KITCHEN', taxRate: 13, isActive: true, tenantId, storeId, modifierGroupIds: foodGroupIds },
+      { id: `${storeId}_prod_9`, name: 'Club Sandwich Classic', price: 6.50, categoryId: `${storeId}_cat_food`, station: 'KITCHEN', taxRate: 13, isActive: true, tenantId, storeId, modifierGroupIds: foodGroupIds },
+      { id: `${storeId}_prod_10`, name: 'Μπύρα Alfa 330ml', price: 3.50, categoryId: `${storeId}_cat_drinks`, station: 'BAR', taxRate: 24, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_11`, name: 'Aperol Spritz', price: 7.50, categoryId: `${storeId}_cat_drinks`, station: 'BAR', taxRate: 24, isActive: true, tenantId, storeId },
+      { id: `${storeId}_prod_12`, name: 'Νερό 500ml', price: 0.50, categoryId: `${storeId}_cat_drinks`, station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId }
+    ];
+
+    // 4. Update In-Memory Reactive State
+    if ((this.inventoryService as any).categories?.set) {
+      (this.inventoryService as any).categories.set(starterCategories);
+    }
+    if ((this.inventoryService as any).modifierGroups?.set) {
+      (this.inventoryService as any).modifierGroups.set(starterModifierGroups);
+    }
+    this.products.update(list => [...list.filter(p => p.storeId !== storeId), ...starterProducts]);
+
+    // 5. Persist to Firestore with Multi-Tenant Scoping
+    if (this.db) {
+      for (const cat of starterCategories) {
+        await setDoc(doc(this.db, 'categories', cat.id), cleanUndefined(cat), { merge: true }).catch(() => {});
+      }
+      for (const group of starterModifierGroups) {
+        await setDoc(doc(this.db, 'modifier_groups', group.id), cleanUndefined(group), { merge: true }).catch(() => {});
+      }
+      for (const prod of starterProducts) {
+        await setDoc(doc(this.db, 'products', prod.id), cleanUndefined(prod), { merge: true }).catch(() => {});
       }
     }
+  }
+
+  // Table & Floor Plan Delegates
+  public addTable(data: { number: string | number; seats?: number; section?: string; zone?: string }) {
+    return this.tableOrderService.addTable(data);
+  }
+
+  public updateTable(tableId: string, data: Partial<Table>) {
+    return this.tableOrderService.updateTable(tableId, data);
+  }
+
+  public deleteTable(tableId: string) {
+    return this.tableOrderService.deleteTable(tableId);
+  }
+
+  public addProductToTableOrder(tableId: string, product: Product, modifiers: OrderModifier[] = [], notes: string = ''): void {
+    this.tableOrderService.addOrderItemToTable(tableId, product, modifiers, notes, this.currentEmployee());
+  }
+
+  public removeOrderItem(tableId: string, itemId: string): void {
+    this.tableOrderService.removeOrderItem(tableId, itemId);
+  }
+
+  public updateOrderItemQuantity(tableId: string, itemId: string, delta: number): void {
+    this.tableOrderService.updateTableOrderItemQuantity(tableId, itemId, delta);
+  }
+
+  public voidOrderItem(tableId: string, itemId: string, reason?: string): void {
+    this.tableOrderService.voidTableOrderItem(tableId, itemId, reason);
+  }
+
+  public bumpOrderItemStatus(tableId: string, itemId: string) {
+    return this.tableOrderService.bumpOrderItemStatus(tableId, itemId);
+  }
+
+  public updateOrderNotes(tableId: string, notes: string): void {
+    const table = this.tables().find(t => t.id === tableId);
+    if (table && table.activeOrder) {
+      this.tableOrderService.updateTable(tableId, {
+        activeOrder: { ...table.activeOrder, notes }
+      });
+    }
+  }
+
+  public printTableBill(tableId: string): void {
+    this.tableOrderService.markTableBillPrinted(tableId);
+  }
+
+  public sendOrderToKitchen(tableId: string) {
+    return this.tableOrderService.sendOrderToKitchen(tableId);
+  }
+
+  public moveOrMergeTable(sourceTableId: string, targetTableId: string) {
+    return this.tableOrderService.moveOrMergeTable(sourceTableId, targetTableId, this.currentEmployee());
+  }
+
+  // 1. Partial Item Settlement (Connected directly to Vault & Audit Log)
+  public async settlePartialItems(
+    tableId: string, 
+    itemIdsToSettle: string[], 
+    method: 'CASH' | 'CARD'
+  ): Promise<{ success: boolean; remainingTotal: number }> {
+    const currentEmp = this.currentEmployee();
+    const activeVaults = this.activeVaultSessions();
+    const targetVault = activeVaults.find(v => v.waiterId === currentEmp?.id && v.status === 'OPEN') 
+                      || this.activeVaultSession();
+
+    return this.tableOrderService.settlePartialItems(
+      tableId, 
+      itemIdsToSettle, 
+      method, 
+      currentEmp, 
+      async (sale: SaleRecord) => {
+        const addedCash = method === 'CASH' ? (sale.grandTotal || 0) : 0;
+        const addedCard = method === 'CARD' ? (sale.grandTotal || 0) : 0;
+
+        if (this.db && targetVault) {
+          try {
+            await updateDoc(doc(this.db, 'vaults', targetVault.id), {
+              cashCollected: increment(addedCash),
+              cardCollected: increment(addedCard)
+            });
+          } catch (e) {
+            console.error('Error incrementing vault totals on partial payment:', e);
+          }
+        }
+
+        this.logAudit(
+          'PARTIAL_PAYMENT_RECEIVED', 
+          `Μερική Είσπραξη €${sale.grandTotal.toFixed(2)} (${method}) - Τραπέζι #${sale.tableNumber}`, 
+          sale.tableNumber
+        );
+      }
+    );
+  }
+
+  // 2. Full Table Settlement (Atomic Increment + Deductions)
+  public async settleTablePayment(
+    tableId: string, 
+    paymentMethod: 'CASH' | 'CARD' | 'DEBT',
+    targetWaiterVaultId?: string
+  ): Promise<void> {
+    const currentEmp = this.currentEmployee();
+
+    if (!currentEmp) {
+      alert('⚠️ Δεν υπάρχει συνδεδεμένος χρήστης. Παρακαλώ συνδεθείτε.');
+      this.logoutEmployee();
+      return;
+    }
+
+    const table = this.tables().find(t => t.id === tableId);
+    const activeOrder = table?.activeOrder;
+
+    if (activeOrder && activeOrder.items) {
+      const unsentItems = activeOrder.items.filter(item => item.status === 'PENDING');
+      if (unsentItems.length > 0) {
+        alert(`⚠️ Υπάρχουν ${unsentItems.length} προϊόντα που δεν έχουν σταλεί στην κουζίνα!`);
+        return;
+      }
+    }
+
+    const activeVaults = this.activeVaultSessions();
+    let targetVault: WaiterVaultSession | null = null;
+
+    if (targetWaiterVaultId) {
+      targetVault = activeVaults.find(v => v.id === targetWaiterVaultId && v.status === 'OPEN') || null;
+    } else {
+      targetVault = activeVaults.find(v => v.waiterId === currentEmp.id && v.status === 'OPEN') || this.activeVaultSession();
+    }
+
+    if (!targetVault) {
+      alert('⚠️ Δεν βρέθηκε ενεργό ανοιχτό ταμείο για τον υπάλληλο. Ανοίξτε ταμείο πριν την είσπραξη.');
+      return;
+    }
+
+    if (activeOrder && activeOrder.items) {
+      activeOrder.items.forEach(orderItem => {
+        const matchingProd = this.products().find(p => p.id === orderItem.productId);
+        if (matchingProd) {
+          this.deductRecipeIngredients(matchingProd, orderItem.quantity);
+        }
+      });
+    }
+
+    return this.tableOrderService.settleTablePayment(tableId, paymentMethod, currentEmp, async (sale) => {
+      const addedCash = paymentMethod === 'CASH' ? (sale.grandTotal || 0) : 0;
+      const addedCard = paymentMethod === 'CARD' ? (sale.grandTotal || 0) : 0;
+
+      if (this.db) {
+        try {
+          await updateDoc(doc(this.db, 'vaults', targetVault!.id), {
+            cashCollected: increment(addedCash),
+            cardCollected: increment(addedCard)
+          });
+        } catch (e) {
+          console.error('Error incrementing vault totals:', e);
+        }
+      }
+
+      this.logAudit(
+        'PAYMENT_RECEIVED', 
+        `Εξόφληση €${sale.grandTotal.toFixed(2)} (${paymentMethod}) - Τραπέζι #${sale.tableNumber}`, 
+        sale.tableNumber
+      );
+    });
   }
 
   public closeDayAndGenerateZReport(): DailyZReportSnapshot {
@@ -1053,6 +1009,15 @@ export class RestaurantPosService {
     const { tenantId, storeId } = this.getActiveTenantAndStore();
     const vat = this.vatBreakdown();
     const todayStr = new Date().toLocaleDateString('el-GR');
+
+    const totalCash = this.salesHistory().reduce(
+      (sum, s) => sum + (s.paymentMethod === 'CASH' ? (s.grandTotal || 0) : 0), 
+      0
+    );
+    const totalCard = this.salesHistory().reduce(
+      (sum, s) => sum + (s.paymentMethod === 'CARD' ? (s.grandTotal || 0) : 0), 
+      0
+    );
 
     const snapshot: DailyZReportSnapshot = {
       id: `Z-REPORT-${Date.now()}`,
@@ -1062,8 +1027,8 @@ export class RestaurantPosService {
       timestamp: new Date().toISOString(),
       closedByEmployeeId: emp?.id || 'SYSTEM',
       closedByEmployeeName: emp?.name || 'Manager',
-      totalCash: Number(this.allVaultSessions().filter(v => v.status === 'CLOSED').reduce((acc, v) => acc + (v.cashCollected || 0), 0).toFixed(2)),
-      totalCard: Number(this.allVaultSessions().filter(v => v.status === 'CLOSED').reduce((acc, v) => acc + (v.cardCollected || 0), 0).toFixed(2)),
+      totalCash: Number(totalCash.toFixed(2)),
+      totalCard: Number(totalCard.toFixed(2)),
       totalGrossRevenue: vat.totalGross,
       net13: vat.net13,
       vat13: vat.vat13,
@@ -1078,15 +1043,22 @@ export class RestaurantPosService {
     }
 
     this.zReports.update(list => [snapshot, ...list]);
-    this.logAudit('Z_REPORT_CLOSED', `Έκδοση Z-Report. Σύνολο Τζίρου: €${snapshot.totalGrossRevenue.toFixed(2)}`);
+    this.logAudit('Z_REPORT_CLOSED', `Έκδοση Z-Report. Τζίρος: €${snapshot.totalGrossRevenue.toFixed(2)}`);
 
     return snapshot;
   }
 
+  // Safe Guarded Reset
   public async resetDatabaseToDefaults(): Promise<void> {
     if (!this.db) return;
 
     const { tenantId, storeId } = this.getActiveTenantAndStore();
+
+    if (tenantId !== 'coffee-shop-demo') {
+      console.error('[Security] Master reset is restricted to demo environments.');
+      alert('⛔ Ο ολικός μηδενισμός επιτρέπεται μόνο σε δοκιμαστικό λογαριασμό (Demo).');
+      return;
+    }
 
     try {
       const collectionsToWipe = ['tables', 'shifts', 'vaults', 'auditLogs', 'spoilageLogs', 'z_reports', 'sales'];
@@ -1112,35 +1084,28 @@ export class RestaurantPosService {
       this.zReports.set([]);
       this.salesHistory.set([]);
 
-      this.logAudit('MASTER_RESET', '🔥 Πλήρης Μηδενισμός Βάσης Καταστήματος');
+      this.logAudit('MASTER_RESET', '🔥 Μηδενισμός Demo Βάσης');
     } catch (e) {
-      console.error('Database reset warning:', e);
+      console.error('Database reset error:', e);
     }
   }
 
-  // --- AUDIT LOGGING ---
+  // Audit Logging
   public logAudit(action: string, details: string, tableContext?: string | number | any): void {
     const emp = this.currentEmployee();
     const { tenantId, storeId } = this.getActiveTenantAndStore();
-
-    const resolvedTenant = emp?.tenantId || tenantId;
-    const resolvedStore = emp?.storeId || storeId;
 
     let resolvedTableNumber: string | number | undefined = undefined;
     if (typeof tableContext === 'string' || typeof tableContext === 'number') {
       resolvedTableNumber = tableContext;
     } else if (tableContext && typeof tableContext === 'object') {
-      resolvedTableNumber = 
-        tableContext.tableNumber ?? 
-        tableContext.number ?? 
-        tableContext.activeOrder?.tableNumber ?? 
-        tableContext.id;
+      resolvedTableNumber = tableContext.tableNumber ?? tableContext.number ?? tableContext.id;
     }
 
     const newLog: AuditLog = {
       id: `AUDIT-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      tenantId: resolvedTenant,
-      storeId: resolvedStore,
+      tenantId: emp?.tenantId || tenantId,
+      storeId: emp?.storeId || storeId,
       timestamp: new Date().toISOString(),
       employeeId: emp?.id || 'SYSTEM',
       employeeName: emp?.name || 'Σύστημα',
@@ -1149,30 +1114,8 @@ export class RestaurantPosService {
       details
     };
 
-    // Only add to local signal if it strictly belongs to this tenant and store
-    const currentTargetTenant = normalizeKey(this.activeTenantId());
-    const currentTargetStore = normalizeKey(this.activeStoreId());
-
-    if (
-      normalizeKey(newLog.tenantId) === currentTargetTenant &&
-      normalizeKey(newLog.storeId) === currentTargetStore
-    ) {
-      this.auditLogs.set([newLog, ...this.auditLogs()]);
-    }
-
     if (this.db) {
-      setDoc(doc(this.db, 'auditLogs', newLog.id), cleanUndefined(newLog)).catch((err) => {
-        console.error('Error writing audit log:', err);
-      });
+      setDoc(doc(this.db, 'auditLogs', newLog.id), cleanUndefined(newLog)).catch(() => {});
     }
-  }
-
-  // --- TABLE TRANSFER & PARTIAL SETTLEMENT DELEGATES ---
-  public moveOrMergeTable(sourceTableId: string, targetTableId: string) {
-    return this.tableOrderService.moveOrMergeTable(sourceTableId, targetTableId, this.currentEmployee());
-  }
-
-  public settlePartialItems(tableId: string, itemIdsToSettle: string[], method: 'CASH' | 'CARD') {
-    return this.tableOrderService.settlePartialItems(tableId, itemIdsToSettle, method, this.currentEmployee());
   }
 }

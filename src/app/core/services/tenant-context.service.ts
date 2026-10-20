@@ -17,7 +17,6 @@ export interface StoreProfile {
   providedIn: 'root'
 })
 export class TenantContextService {
-  // 🏢 Scalable Store Registry: Add new client shops here anytime!
   public readonly registeredStores: StoreProfile[] = [
     {
       tenantId: 'tirane-kafe-1974',
@@ -37,50 +36,63 @@ export class TenantContextService {
       icon: '✨',
       themeColor: 'sky',
       isDemo: true
+    },
+    {
+      tenantId: 'beach-bar-test',
+      storeId: 'store-1',
+      name: 'Beach Bar Test',
+      badge: 'BB',
+      city: 'Athens',
+      icon: '🏖️',
+      themeColor: 'emerald'
     }
   ];
 
-  // Reactive State Signals
+  // Initialize from storage or default to primary store
+  private readonly defaultStore = this.registeredStores[0];
+
   public currentTenantId = signal<string>(
-    localStorage.getItem('active_tenant_id') || 'tirane-kafe-1974'
+    localStorage.getItem('active_tenant_id') || this.defaultStore.tenantId
   );
 
   public currentStoreId = signal<string>(
-    localStorage.getItem('active_store_id') || 'store-2'
+    localStorage.getItem('active_store_id') || this.defaultStore.storeId
   );
 
-  // Active Store Profile Computed Signal
   public activeStore = computed<StoreProfile>(() => {
     const tenant = this.currentTenantId();
     const store = this.currentStoreId();
     return (
       this.registeredStores.find(s => s.tenantId === tenant && s.storeId === store) ||
-      this.registeredStores[0]
+      this.defaultStore
     );
   });
 
   /**
-   * Direct setter for Tenant & Store IDs (used by tenant-switcher component)
+   * Sets tenant and store context with input validation against registered stores
    */
   public setTenantAndStore(tenantId: string, storeId: string = 'store-1'): void {
+    const isValid = this.registeredStores.some(
+      s => s.tenantId === tenantId && s.storeId === storeId
+    );
+
+    if (!isValid) {
+      console.error(`Invalid tenant/store context rejected: ${tenantId} / ${storeId}`);
+      return;
+    }
+
     this.currentTenantId.set(tenantId);
     this.currentStoreId.set(storeId);
 
     localStorage.setItem('active_tenant_id', tenantId);
     localStorage.setItem('active_store_id', storeId);
 
-    // Clean session caches to prevent cross-tenant contamination
+    // Wipe cached credentials to avoid cross-tenant leaks
     localStorage.removeItem('current_employee');
     localStorage.removeItem('maranth_pos_employee');
-
-    // Reload cleanly to reconnect all Firestore listeners to the new store
-    window.location.href = '/login';
   }
 
-  /**
-   * Fast 1-Click Store Switcher
-   */
-  public switchStore(target: StoreProfile): void {
-    this.setTenantAndStore(target.tenantId, target.storeId);
+  public resetToDefault(): void {
+    this.setTenantAndStore(this.defaultStore.tenantId, this.defaultStore.storeId);
   }
 }

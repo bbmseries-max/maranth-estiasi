@@ -1,14 +1,14 @@
-// src/app/features/waiter-login/waiter-login.component.ts
+// src/app/features/auth/waiter-login.component.ts
 
-import { Component, inject, signal, OnInit, computed } from '@angular/core';
+import { Component, inject, signal, OnInit, computed, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, ActivatedRoute } from '@angular/router';
 
-import { DevicePairingService } from '../../core/services/device-pairing.service';
 import { AuthShiftService } from '../../core/services/auth-shift.service'; 
 import { RestaurantPosService } from '../../core/services/restaurant-pos.service';
 import { AutoLogoutService } from '../../core/services/auto-logout.service';
+import { TenantContextService } from '../../core/services/tenant-context.service';
 import { Employee } from '../../core/modals';
 
 @Component({
@@ -18,35 +18,40 @@ import { Employee } from '../../core/modals';
   templateUrl: './waiter-login.component.html'
 })
 export class WaiterLoginComponent implements OnInit {
-  public deviceService = inject(DevicePairingService);
   public authShiftService = inject(AuthShiftService);
   public posService = inject(RestaurantPosService);
+  public tenantContext = inject(TenantContextService);
   private autoLogoutService = inject(AutoLogoutService);
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
+  private ngZone = inject(NgZone);
 
-  public step = signal<'DEVICE_SETUP' | 'PIN_ENTRY' | 'SHIFT_SETUP'>('PIN_ENTRY');
-  public pendingEmployee = signal<Employee | null>(null); // 👈 Holds employee while picking float
-  
-  public licenseInput = signal<string>('');
-  public isActivating = signal<boolean>(false);
+  public step = signal<'PIN_ENTRY' | 'SHIFT_SETUP'>('PIN_ENTRY');
+  public pendingEmployee = signal<Employee | null>(null);
 
   public enteredPin = signal<string>('');
   public errorMessage = signal<string>('');
-  public startingFloat: number = 50; // Default preset
-  public supportsBiometrics = false;
+  public startingFloat: number = 50;
 
-  public activeShop = computed(() => this.deviceService.currentLicense());
+  // Active store details pulled directly from your registeredStores registry
+  public activeShop = computed(() => this.tenantContext.activeStore());
 
   ngOnInit(): void {
     this.enteredPin.set('');
     this.errorMessage.set('');
-    this.supportsBiometrics = !!(window.PublicKeyCredential);
 
-    if (!this.deviceService.isDevicePaired()) {
-      this.step.set('DEVICE_SETUP');
-    } else {
-      this.step.set('PIN_ENTRY');
+    // Ensure tenant context matches the authoritative route slug
+    const routeSlug = this.route.snapshot.paramMap.get('tenantSlug') || 
+                      this.route.parent?.snapshot.paramMap.get('tenantSlug');
+
+    if (routeSlug && routeSlug !== this.tenantContext.currentTenantId()) {
+      const store = this.tenantContext.registeredStores.find(s => s.tenantId === routeSlug);
+      if (store) {
+        this.tenantContext.setTenantAndStore(store.tenantId, store.storeId);
+      }
     }
+
+    this.step.set('PIN_ENTRY');
   }
 
   public appendDigit(digit: string): void {
@@ -70,18 +75,21 @@ export class WaiterLoginComponent implements OnInit {
     if (!pinValue) return;
 
     this.errorMessage.set('');
+    const targetTenant = this.tenantContext.currentTenantId();
 
     try {
-      // Find employee by PIN from the loaded employees list
       const employees = this.posService.employees();
       const employee = employees.find(e => 
-        (e.pinCode === pinValue || e.pin === pinValue) && (e.isActive ?? e.active ?? true)
+        (e.pinCode === pinValue || e.pin === pinValue) && 
+        (e.isActive ?? e.active ?? true) &&
+        (!e.tenantId || e.tenantId === targetTenant)
       );
 
       if (employee) {
+        employee.tenantId = targetTenant;
         this.handleSuccessfulAuth(employee);
       } else {
-        this.errorMessage.set('Άκυρος κωδικός PIN. Παρακαλώ δοκιμάστε ξανά.');
+        this.errorMessage.set(`Άκυρος κωδικός PIN για το κατάστημα ${this.activeShop()?.name || ''}.`);
         this.enteredPin.set('');
       }
     } catch (err) {
@@ -90,46 +98,42 @@ export class WaiterLoginComponent implements OnInit {
       this.enteredPin.set('');
     }
   }
-      private isKitchenOrBarRole(role?: string): boolean {
-  const r = (role || '').toUpperCase();
-  return r === 'KITCHEN' || r === 'CHEF' || r === 'BAR' || r === 'BARISTA' || r === 'BARMAN';
-}
 
- private handleSuccessfulAuth(employee: Employee): void {
-  // 1. Kitchen & Bar Staff -> Skip float setup completely, go straight to KDS
-  if (this.isKitchenOrBarRole(employee.role)) {
-    this.posService.setLoggedInEmployee(employee, 0);
-    this.redirectByRole(employee.role);
-    return;
+  private isKitchenOrBarRole(role?: string): boolean {
+    const r = (role || '').toUpperCase();
+    return r === 'KITCHEN' || r === 'CHEF' || r === 'BAR' || r === 'BARISTA' || r === 'BARMAN';
   }
 
-  // 2. Check if Waiter / Floor staff already has an OPEN vault
-  const activeVaults = this.posService.activeVaultSessions() || [];
-  const cleanPin = (employee.pinCode || employee.pin || '').trim();
+  private handleSuccessfulAuth(employee: Employee): void {
+    if (this.isKitchenOrBarRole(employee.role)) {
+      this.posService.setLoggedInEmployee(employee, 0);
+      this.redirectByRole(employee.role);
+      return;
+    }
 
-  const existingVault = activeVaults.find(
-    v => v.status === 'OPEN' && (v.waiterId === employee.id || v.waiterId === cleanPin || v.waiterName === employee.name)
-  );
+    const activeVaults = this.posService.activeVaultSessions() || [];
+    const existingVault = activeVaults.find(
+      v => v.status === 'OPEN' && v.waiterId === employee.id
+    );
 
-  if (existingVault) {
-    // Already has an active open vault: Log in directly without re-prompting float
-    this.posService.setLoggedInEmployee(employee, existingVault.startingFloat);
-    this.redirectByRole(employee.role);
-  } else {
-    // Waiter starting a fresh shift -> Show float selection modal (€20, €30, €50)
-    this.pendingEmployee.set(employee);
-    this.startingFloat = 50;
-    this.step.set('SHIFT_SETUP');
+    if (existingVault) {
+      this.posService.setLoggedInEmployee(employee, existingVault.startingFloat);
+      this.redirectByRole(employee.role);
+    } else {
+      this.pendingEmployee.set(employee);
+      this.startingFloat = 50;
+      this.step.set('SHIFT_SETUP');
+    }
   }
-}
 
-private redirectByRole(role?: string): void {
-  if (this.isKitchenOrBarRole(role)) {
-    this.router.navigate(['/kitchen'], { replaceUrl: true });
-  } else {
-    this.router.navigate(['/floor-plan'], { replaceUrl: true });
+  private redirectByRole(role?: string): void {
+    const slug = this.tenantContext.currentTenantId() || 'coffee-shop-demo';
+    const targetArea = this.isKitchenOrBarRole(role) ? 'kitchen' : 'floor-plan';
+
+    this.ngZone.run(() => {
+      this.router.navigate(['/t', slug, targetArea], { replaceUrl: true });
+    });
   }
-}
 
   public async startShiftAndVault(): Promise<void> {
     const emp = this.pendingEmployee() || this.posService.currentEmployee();
@@ -141,10 +145,14 @@ private redirectByRole(role?: string): void {
 
     const floatAmount = Number(this.startingFloat) >= 0 ? Number(this.startingFloat) : 0;
 
-    // Set employee AND create vault with the chosen float amount
-    await this.posService.setLoggedInEmployee(emp, floatAmount);
-    this.autoLogoutService.startMonitoring();
-    this.redirectByRole(emp.role);
+    try {
+      this.posService.setLoggedInEmployee(emp, floatAmount);
+      this.autoLogoutService.startMonitoring();
+      this.redirectByRole(emp.role);
+    } catch (err) {
+      console.error('Error starting shift and vault:', err);
+      this.errorMessage.set('Σφάλμα κατά την έναρξη του ταμείου.');
+    }
   }
 
   public cancelShiftSetup(): void {
@@ -152,31 +160,5 @@ private redirectByRole(role?: string): void {
     this.enteredPin.set('');
     this.errorMessage.set('');
     this.step.set('PIN_ENTRY');
-  }
-
-  public async submitActivationKey(): Promise<void> {
-    const key = this.licenseInput().trim();
-    if (!key) return;
-    this.isActivating.set(true);
-    const res = await this.deviceService.activateDeviceWithKey(key);
-    this.isActivating.set(false);
-    if (res.success) {
-      this.step.set('PIN_ENTRY');
-    } else {
-      this.errorMessage.set(res.message);
-    }
-  }
-
-  public quickSetKey(key: string): void {
-    this.licenseInput.set(key);
-    this.submitActivationKey();
-  }
-
-  public promptUnpairDevice(): void {
-    const code = prompt('Εισάγετε Master PIN:');
-    if (code === '9999' || code === '0000') {
-      this.deviceService.unpairDevice();
-      this.step.set('DEVICE_SETUP');
-    }
   }
 }

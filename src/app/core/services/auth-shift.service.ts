@@ -1,5 +1,3 @@
-// src/app/core/services/auth-shift.service.ts
-
 import { Injectable, signal, computed, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { 
@@ -8,15 +6,12 @@ import {
   doc, 
   setDoc, 
   onSnapshot, 
+  query, 
+  where, 
   Unsubscribe 
 } from 'firebase/firestore';
 import { TenantContextService } from './tenant-context.service';
-
-import { 
-  Employee, 
-  WorkShiftLog, 
-  Role 
-} from '../modals';
+import { Employee, WorkShiftLog, Role } from '../modals';
 
 function cleanUndefined<T>(obj: T): T {
   if (obj === null || typeof obj !== 'object') return obj;
@@ -39,6 +34,7 @@ function normalizeKey(val?: string | null): string {
 @Injectable({
   providedIn: 'root'
 })
+
 export class AuthShiftService {
   private tenantContext = inject(TenantContextService);
   private router = inject(Router);
@@ -62,45 +58,23 @@ export class AuthShiftService {
     }
   }
 
-  // --- MULTI-TENANCY CONTEXT ---
+  // Authoritative Context
   public activeTenantId = computed(() => {
-    return (
-      this.currentEmployee()?.tenantId || 
-      localStorage.getItem('active_tenant_id') || 
-      (this.tenantContext as any)?.currentTenantId?.() || 
-      'coffee-shop-demo'
-    );
+    return this.currentEmployee()?.tenantId || this.tenantContext.currentTenantId();
   });
 
- public activeStoreId = computed(() => {
-    return (
-      this.currentEmployee()?.storeId || 
-      localStorage.getItem('active_store_id') || 
-      (this.tenantContext as any)?.currentStoreId?.() || 
-      'store-1'
-    );
+  public activeStoreId = computed(() => {
+    return this.currentEmployee()?.storeId || this.tenantContext.currentStoreId();
   });
 
-  // --- ROLE SECURITY ---
   public canManageSystem = computed(() => {
-    const emp = this.currentEmployee();
-    const role = (emp?.role as string)?.toUpperCase();
+    const role = (this.currentEmployee()?.role as string)?.toUpperCase();
     return role === 'MANAGER' || role === 'ADMIN' || role === 'OWNER';
   });
 
   public storeShifts = computed(() => {
-    const targetTenant = normalizeKey(this.activeTenantId());
-    const targetStore = normalizeKey(this.activeStoreId());
-
-    return this.workShifts().filter(shift => {
-      const sTenant = normalizeKey(shift.tenantId);
-      const sStore = normalizeKey(shift.storeId);
-
-      const matchesTenant = sTenant === targetTenant;
-      const matchesStore = !sStore || sStore === targetStore || sStore === 'all';
-
-      return matchesTenant && matchesStore;
-    });
+    const targetStore = this.activeStoreId();
+    return this.workShifts().filter(s => !s.storeId || s.storeId === targetStore || s.storeId === 'all');
   });
 
   constructor() {
@@ -108,130 +82,108 @@ export class AuthShiftService {
   }
 
   private restoreSession(): void {
-    try {
-      const saved = localStorage.getItem('current_employee') || localStorage.getItem('maranth_pos_employee');
-      if (saved) {
-        const emp: Employee = JSON.parse(saved);
-        this.currentEmployee.set(emp);
+    const emp = this.loadStoredEmployee();
+    if (emp) {
+      if (emp.tenantId && emp.tenantId !== this.tenantContext.currentTenantId()) {
+        this.logoutEmployee();
+        return;
       }
-    } catch (err) {
-      console.warn('Failed to restore employee session:', err);
+      this.currentEmployee.set(emp);
     }
   }
 
-  public getInitialStoreEmployees(tenantId: string, storeId: string): Employee[] {
-    const isDemo = normalizeKey(tenantId) === 'coffeeshopdemo';
-    
-    if (isDemo) {
-      return [
-        { 
-          id: `emp_demo_9999`, 
-          name: 'Demo Διαχειριστής (9999)', 
-          pin: '9999', 
-          pinCode: '9999', 
-          role: 'MANAGER', 
-          hourlyRate: 10.0, 
-          isActive: true, 
-          active: true, 
-          tenantId: 'coffee-shop-demo', 
-          storeId: 'store-1' 
-        },
-        { 
-          id: `emp_demo_1234`, 
-          name: 'Demo Barista (1234)', 
-          pin: '1234', 
-          pinCode: '1234', 
-          role: 'WAITER', 
-          hourlyRate: 6.5, 
-          isActive: true, 
-          active: true, 
-          tenantId: 'coffee-shop-demo', 
-          storeId: 'store-1' 
-        }
-      ];
-    }
-
-    return [
-      { 
-        id: `emp_${normalizeKey(tenantId)}_1111`, 
-        name: 'Υπεύθυνος (1111)', 
-        pin: '1111', 
-        pinCode: '1111', 
-        role: 'MANAGER', 
-        hourlyRate: 8.5, 
-        isActive: true, 
-        active: true, 
-        tenantId, 
-        storeId 
-      }
-    ];
-  }
-
+  /**
+   * Initializes real-time sync with STRICT server-side Firestore query constraints
+   */
   public initFirestoreSync(db: Firestore): void {
     this.db = db;
     if (!this.db) return;
 
-    if (this.empSyncUnsub) this.empSyncUnsub();
-    if (this.shiftSyncUnsub) this.shiftSyncUnsub();
+    this.teardownListeners();
 
-    const targetTenant = normalizeKey(this.activeTenantId());
-    const targetStore = normalizeKey(this.activeStoreId());
+    const tenantId = this.activeTenantId();
 
-    // 1. Sync Employees - STRICT TENANT ISOLATION
-    this.empSyncUnsub = onSnapshot(collection(this.db, 'employees'), (snap) => {
-      const allEmps: Employee[] = [];
+   // 1. Scoped Employee Query (Server-side filter)
+    const empQuery = query(
+      collection(this.db, 'employees'),
+      where('tenantId', '==', tenantId),
+      where('isActive', '==', true)
+    );
+
+    this.empSyncUnsub = onSnapshot(empQuery, async (snap) => {
+      const tenantEmps: Employee[] = [];
       snap.forEach(docSnap => {
-        const data = docSnap.data() as Employee;
-        const empId = data.id || docSnap.id;
-        const docTenant = normalizeKey(data.tenantId);
-        const docStore = normalizeKey(data.storeId);
-
-        const matchesTenant = !docTenant || docTenant === targetTenant;
-        const matchesStore = !docStore || docStore === targetStore || docStore === 'all';
-
-        if (matchesTenant && matchesStore && data.isActive !== false) {
-          allEmps.push({ ...data, id: empId });
-        }
+        tenantEmps.push({ ...(docSnap.data() as Employee), id: docSnap.id });
       });
 
-      if (allEmps.length > 0) {
-        this.employees.set(allEmps);
+      // 🛡️ If this is a brand-new tenant with NO employees in the database, provision the default manager!
+      if (tenantEmps.length === 0) {
+        const defaultEmps = this.getInitialStoreEmployees(tenantId, this.activeStoreId());
+        this.employees.set(defaultEmps);
+
+        // Save default manager to Firestore so they exist permanently
+        if (this.db) {
+          for (const emp of defaultEmps) {
+            await setDoc(doc(this.db, 'employees', emp.id), cleanUndefined(emp), { merge: true }).catch(() => {});
+          }
+        }
+      } else {
+        this.employees.set(tenantEmps);
       }
+    }, (err) => {
+      console.error(`[Security/Firestore] Failed to sync employees for tenant: ${tenantId}`, err);
     });
 
-    // 2. Sync Shifts - STRICT TENANT ISOLATION
-    this.shiftSyncUnsub = onSnapshot(collection(this.db, 'shifts'), (snap) => {
+    this.empSyncUnsub = onSnapshot(empQuery, (snap) => {
+      const tenantEmps: Employee[] = [];
+      snap.forEach(docSnap => {
+        tenantEmps.push({ ...(docSnap.data() as Employee), id: docSnap.id });
+      });
+      this.employees.set(tenantEmps);
+    }, (err) => {
+      console.error(`[Security/Firestore] Failed to sync employees for tenant: ${tenantId}`, err);
+    });
+
+    // 2. Scoped Shifts Query (Server-side filter)
+    const shiftsQuery = query(
+      collection(this.db, 'shifts'),
+      where('tenantId', '==', tenantId)
+    );
+
+    this.shiftSyncUnsub = onSnapshot(shiftsQuery, (snap) => {
       const shiftList: WorkShiftLog[] = [];
       snap.forEach(docSnap => {
-        const data = docSnap.data() as WorkShiftLog;
-        const shiftId = data.id || docSnap.id;
-        const docTenant = normalizeKey(data.tenantId);
-        const docStore = normalizeKey(data.storeId);
-
-        const matchesTenant = !docTenant || docTenant === targetTenant;
-        const matchesStore = !docStore || docStore === targetStore || docStore === 'all';
-
-        if (matchesTenant && matchesStore) {
-          shiftList.push({ ...data, id: shiftId });
-        }
+        shiftList.push({ ...(docSnap.data() as WorkShiftLog), id: docSnap.id });
       });
-
       this.workShifts.set(shiftList);
 
-      // 🛡️ CRITICAL: ONLY update activeWorkShift for the employee ALREADY logged in on this device.
-      // NEVER touch this.currentEmployee here!
-      const myLocalEmp = this.currentEmployee();
-      if (myLocalEmp) {
-        const myShift = shiftList.find(s => s.status === 'WORKING' && s.employeeId === myLocalEmp.id);
+      const localEmp = this.currentEmployee();
+      if (localEmp) {
+        const myShift = shiftList.find(s => s.status === 'WORKING' && s.employeeId === localEmp.id);
         this.activeWorkShift.set(myShift || null);
       }
+    }, (err) => {
+      console.error(`[Security/Firestore] Failed to sync shifts for tenant: ${tenantId}`, err);
     });
+  }
+
+  public teardownListeners(): void {
+    if (this.empSyncUnsub) {
+      this.empSyncUnsub();
+      this.empSyncUnsub = null;
+    }
+    if (this.shiftSyncUnsub) {
+      this.shiftSyncUnsub();
+      this.shiftSyncUnsub = null;
+    }
   }
 
   // --- AUTHENTICATION METHODS ---
   public async loginWithPin(pin: string): Promise<Employee | null> {
     const cleanPin = pin.trim();
-    const matchedEmp = this.employees().find(e => (e.pin === cleanPin || (e as any).pinCode === cleanPin) && e.isActive !== false);
+    if (!cleanPin) return null;
+
+    const matchedEmp = this.employees().find(e => (e.pin === cleanPin || e.pinCode === cleanPin));
 
     if (matchedEmp) {
       this.setLoggedInEmployee(matchedEmp);
@@ -241,35 +193,42 @@ export class AuthShiftService {
   }
 
   public setLoggedInEmployee(emp: Employee): void {
-    this.currentEmployee.set(emp);
+    const activeTenant = this.tenantContext.currentTenantId();
 
-    localStorage.setItem('current_employee', JSON.stringify(emp));
-    localStorage.setItem('maranth_pos_employee', JSON.stringify(emp));
+    // Ensure employee object belongs to the store we are actually in
+    const scopedEmp: Employee = {
+      ...emp,
+      tenantId: activeTenant,
+      storeId: this.tenantContext.currentStoreId()
+    };
 
-    if (emp.tenantId) localStorage.setItem('active_tenant_id', emp.tenantId);
-    if (emp.storeId) localStorage.setItem('active_store_id', emp.storeId);
+    this.currentEmployee.set(scopedEmp);
+    localStorage.setItem('current_employee', JSON.stringify(scopedEmp));
+    localStorage.setItem('maranth_pos_employee', JSON.stringify(scopedEmp));
 
-    const existingShift = this.getEmployeeActiveShift(emp.id);
+    const existingShift = this.getEmployeeActiveShift(scopedEmp.id);
     if (existingShift) {
       this.activeWorkShift.set(existingShift);
     } else {
-      this.clockInShift(`Σύνδεση χρήστη (${emp.name})`, emp);
+      this.clockInShift(`Σύνδεση χρήστη (${scopedEmp.name})`, scopedEmp);
     }
   }
 
   public logoutEmployee(): void {
     this.currentEmployee.set(null);
     this.activeWorkShift.set(null);
-
     localStorage.removeItem('current_employee');
     localStorage.removeItem('maranth_pos_employee');
-
     this.router.navigate(['/login'], { replaceUrl: true });
   }
 
+  public getEmployeeActiveShift(empId: string): WorkShiftLog | undefined {
+    if (!empId) return undefined;
+    return this.workShifts().find(s => s.status === 'WORKING' && s.employeeId === empId);
+  }
 
   // --- SHIFT LOGGING METHODS ---
-public async clockInShift(notes: string = '', targetEmp?: Employee): Promise<void> {
+  public async clockInShift(notes: string = '', targetEmp?: Employee): Promise<void> {
     const emp = targetEmp || this.currentEmployee();
     if (!emp || !this.db) return;
 
@@ -286,7 +245,6 @@ public async clockInShift(notes: string = '', targetEmp?: Employee): Promise<voi
 
     this.activeWorkShift.set(newShift);
     this.workShifts.update(list => [newShift, ...list]);
-
     await setDoc(doc(this.db, 'shifts', newShift.id), newShift).catch(e => console.error(e));
   }
 
@@ -303,63 +261,40 @@ public async clockInShift(notes: string = '', targetEmp?: Employee): Promise<voi
       totalSales?: number;
     }
   ): Promise<void> {
-    if (!empIdOrPinOrName) return;
+    if (!empIdOrPinOrName || !this.db) return;
     const targetKey = String(empIdOrPinOrName).trim().toLowerCase();
     const nowStr = new Date().toISOString();
 
-    const allShifts = this.workShifts();
-    
-    const matchingShifts = allShifts.filter(s => 
-      s.status === 'WORKING' && 
+    const activeShift = this.workShifts().find(
+      s => s.status === 'WORKING' && 
       (
-        String(s.employeeId || '').toLowerCase() === targetKey || 
-        String(s.employeeName || '').toLowerCase() === targetKey || 
-        String(s.id || '').toLowerCase() === targetKey
+        s.employeeId.toLowerCase() === targetKey ||
+        (s.employeeName && s.employeeName.toLowerCase() === targetKey) ||
+        s.id.toLowerCase() === targetKey
       )
     );
 
-    const updatedShifts = allShifts.map(s => {
-      const isTarget = matchingShifts.some(m => m.id === s.id);
-      if (isTarget) {
-        return {
-          ...s,
-          status: 'COMPLETED' as const,
-          clockOutTime: nowStr,
-          notes: notes || 'Κλείσιμο βάρδιας',
-          ...(financialSummary || {})
-        };
-      }
-      return s;
-    });
+    if (!activeShift) return;
 
-    this.workShifts.set(updatedShifts);
+    const closedShift: WorkShiftLog = {
+      ...activeShift,
+      status: 'COMPLETED',
+      clockOutTime: nowStr,
+      notes: notes || 'Κλείσιμο βάρδιας',
+      ...(financialSummary || {})
+    };
 
-    const current = this.currentEmployee();
-    if (current && (current.id.toLowerCase() === targetKey || current.name.toLowerCase() === targetKey)) {
+    this.workShifts.update(list => list.map(s => s.id === activeShift.id ? closedShift : s));
+
+    if (this.currentEmployee()?.id === activeShift.employeeId) {
       this.activeWorkShift.set(null);
     }
 
-    if (this.db) {
-      for (const shift of matchingShifts) {
-        const closedShiftRecord = {
-          ...shift,
-          status: 'COMPLETED',
-          clockOutTime: nowStr,
-          notes: notes || shift.notes || 'Κλείσιμο βάρδιας',
-          ...(financialSummary || {})
-        };
-        try {
-          await setDoc(doc(this.db, 'shifts', shift.id), cleanUndefined(closedShiftRecord), { merge: true });
-        } catch (err) {
-          console.error('Error closing shift in Firestore:', err);
-        }
-      }
+    try {
+      await setDoc(doc(this.db, 'shifts', activeShift.id), cleanUndefined(closedShift), { merge: true });
+    } catch (err) {
+      console.error('Error closing shift in Firestore:', err);
     }
-  }
-
-  public getEmployeeActiveShift(empId: string): WorkShiftLog | undefined {
-    if (!empId) return undefined;
-    return this.workShifts().find(s => s.status === 'WORKING' && s.employeeId === empId);
   }
 
   public async closeAllActiveShifts(): Promise<void> {
@@ -489,5 +424,54 @@ public async clockInShift(notes: string = '', targetEmp?: Employee): Promise<voi
       console.error('Biometric registration error:', error);
       return { success: false, message: 'Αποτυχία καταχώρησης αποτυπώματος.' };
     }
+  }
+
+  public getInitialStoreEmployees(tenantId: string, storeId: string): Employee[] {
+    const isDemo = normalizeKey(tenantId) === 'coffeeshopdemo';
+    
+    if (isDemo) {
+      return [
+        { 
+          id: `emp_demo_9999`, 
+          name: 'Demo Διαχειριστής (9999)', 
+          pin: '9999', 
+          pinCode: '9999', 
+          role: 'MANAGER', 
+          hourlyRate: 10.0, 
+          isActive: true, 
+          active: true, 
+          tenantId: 'coffee-shop-demo', 
+          storeId: 'store-1' 
+        },
+        { 
+          id: `emp_demo_1234`, 
+          name: 'Demo Barista (1234)', 
+          pin: '1234', 
+          pinCode: '1234', 
+          role: 'WAITER', 
+          hourlyRate: 6.5, 
+          isActive: true, 
+          active: true, 
+          tenantId: 'coffee-shop-demo', 
+          storeId: 'store-1' 
+        }
+      ];
+    }
+
+    // Default for Beach Bar or any new tenant:
+    return [
+      { 
+        id: `emp_${normalizeKey(tenantId)}_1111`, 
+        name: 'Υπεύθυνος Καταστήματος (1111)', 
+        pin: '1111', 
+        pinCode: '1111', 
+        role: 'MANAGER', 
+        hourlyRate: 10.0, 
+        isActive: true, 
+        active: true, 
+        tenantId, 
+        storeId 
+      }
+    ];
   }
 }

@@ -6,7 +6,8 @@
       
       <div class="flex items-center gap-6">
         <!-- LOGO -->
-        <a [routerLink]="isKitchenOnly(emp.role) ? '/kitchen' : '/floor-plan'" class="flex items-center gap-3 no-underline cursor-pointer">
+        <a [routerLink]="['/t', posService.tenantContext.currentTenantId(), isKitchenOnly(emp.role) ? 'kitchen' : 'floor-plan']" 
+           class="flex items-center gap-3 no-underline cursor-pointer">
           <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-400 flex items-center justify-center text-2xl shadow-md">
             ☕
           </div>
@@ -19,7 +20,7 @@
         <!-- MAIN NAVIGATION BUTTONS -->
         <nav class="flex items-center gap-2 sm:gap-3">
           @if (canAccessFloorPlan(emp.role)) {
-            <a routerLink="/floor-plan" 
+            <a [routerLink]="['/t', posService.tenantContext.currentTenantId(), 'floor-plan']" 
                routerLinkActive="!bg-amber-500/10 !text-amber-400 !border-amber-500/30"
                class="h-12 px-4 md:px-5 rounded-2xl text-sm font-black text-slate-400 bg-slate-800 border border-transparent hover:bg-slate-700 hover:text-white transition-all flex items-center gap-2.5 cursor-pointer no-underline">
               <span class="text-lg">🪑</span>
@@ -28,7 +29,7 @@
           }
 
           @if (canAccessKitchen(emp.role)) {
-            <a routerLink="/kitchen" 
+            <a [routerLink]="['/t', posService.tenantContext.currentTenantId(), 'kitchen']" 
                routerLinkActive="!bg-amber-500/10 !text-amber-400 !border-amber-500/30"
                class="h-12 px-4 md:px-5 rounded-2xl text-sm font-black text-slate-400 bg-slate-800 border border-transparent hover:bg-slate-700 hover:text-white transition-all flex items-center gap-2.5 cursor-pointer no-underline">
               <span class="text-lg">🥣</span>
@@ -37,14 +38,14 @@
           }
 
           @if (canAccessManagement(emp.role)) {
-            <a routerLink="/inventory" 
+            <a [routerLink]="['/t', posService.tenantContext.currentTenantId(), 'inventory']" 
                routerLinkActive="!bg-amber-500/10 !text-amber-400 !border-amber-500/30"
                class="h-12 px-4 md:px-5 rounded-2xl text-sm font-black text-slate-400 bg-slate-800 border border-transparent hover:bg-slate-700 hover:text-white transition-all flex items-center gap-2.5 cursor-pointer no-underline">
               <span class="text-lg">⚙️</span>
               <span class="hidden lg:inline">Αποθήκη</span>
             </a>
 
-            <a routerLink="/reports" 
+            <a [routerLink]="['/t', posService.tenantContext.currentTenantId(), 'reports']" 
                routerLinkActive="!bg-amber-500/10 !text-amber-400 !border-amber-500/30"
                class="h-12 px-4 md:px-5 rounded-2xl text-sm font-black text-slate-400 bg-slate-800 border border-transparent hover:bg-slate-700 hover:text-white transition-all flex items-center gap-2.5 cursor-pointer no-underline">
               <span class="text-lg">📊</span>
@@ -55,28 +56,28 @@
       </div>
 
       <!-- RIGHT SIDE: USER PROFILE BADGE -->
-   <div class="flex items-center gap-2 sm:gap-3">
-    
-    <!-- User Profile Badge -->
-    <div class="hidden sm:flex items-center gap-3 h-12 px-3.5 rounded-2xl bg-slate-800 border border-slate-700 shadow-inner">
-      <div class="flex flex-col items-end">
-        <span class="text-xs sm:text-sm font-black text-white leading-tight">{{ emp.name }}</span>
-        <span class="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">{{ getRoleBadgeLabel(emp.role) }}</span>
-      </div>
-      <div class="w-8 h-8 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center text-sm">
-        👤
-      </div>
-    </div>
+      <div class="flex items-center gap-2 sm:gap-3">
+        
+        <!-- User Profile Badge -->
+        <div class="hidden sm:flex items-center gap-3 h-12 px-3.5 rounded-2xl bg-slate-800 border border-slate-700 shadow-inner">
+          <div class="flex flex-col items-end">
+            <span class="text-xs sm:text-sm font-black text-white leading-tight">{{ emp.name }}</span>
+            <span class="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">{{ getRoleBadgeLabel(emp.role) }}</span>
+          </div>
+          <div class="w-8 h-8 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center text-sm">
+            👤
+          </div>
+        </div>
 
-    <!-- Restored Logout Button -->
-    <button (click)="posService.logoutEmployee()"
-            class="h-12 px-3.5 sm:px-4 rounded-2xl bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30 text-xs sm:text-sm font-black transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer shadow-sm"
-            title="Αποσύνδεση χρήστη">
-      <span class="text-base">🚪</span>
-      <span class="hidden sm:inline">Έξοδος</span>
-    </button>
+        <!-- Logout Button -->
+        <button (click)="endMyShift()"
+                class="h-12 px-3.5 sm:px-4 rounded-2xl bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30 text-xs sm:text-sm font-black transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer shadow-sm"
+                title="Κλείσιμο βάρδιας & αποσύνδεση">
+          <span class="text-base">🚪</span>
+          <span class="hidden sm:inline">Έξοδος</span>
+        </button>
 
-  </div>
+      </div>
 
     </header>
 
@@ -105,7 +106,7 @@
     }
   }
 
-  <main class="flex-1 w-full flex flex-col">
+<main class="flex-1 w-full flex flex-col">
     <router-outlet></router-outlet>
   </main>
 

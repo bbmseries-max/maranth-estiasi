@@ -87,67 +87,84 @@ export class InventoryService {
     if (!dbInstance) return;
     this.db = dbInstance;
 
-    // Unsubscribe existing listeners if switching store
+    // 1. Unsubscribe existing listeners cleanly
     this.stopFirestoreSync();
+
+    // 2. If it's a demo tenant and should bypass remote Firestore sync, exit early
+    if (isDemoTenantCheck && isDemoTenantCheck()) {
+      return;
+    }
 
     const { tenantId, storeId } = this.getActiveTenantAndStore();
 
-    // 1. Sync Products (Filtered strictly by tenantId & storeId)
-    const prodQuery = query(
-      collection(this.db, 'products'),
-      where('tenantId', '==', tenantId),
-      where('storeId', '==', storeId)
-    );
-    const unsubProd = onSnapshot(prodQuery, (snap) => {
-      if (isDemoTenantCheck && isDemoTenantCheck()) return;
-      const prods: Product[] = [];
-      snap.forEach(d => prods.push(d.data() as Product));
-      this.products.set(prods);
-    });
-    this.activeListeners.push(unsubProd);
-
-    // 2. Sync Categories (Filtered strictly by tenantId & storeId)
+    // 1. Sync Categories (Filtered strictly by tenantId & storeId)
     const catQuery = query(
       collection(this.db, 'categories'),
       where('tenantId', '==', tenantId),
       where('storeId', '==', storeId)
     );
     const unsubCat = onSnapshot(catQuery, (snap) => {
-      if (isDemoTenantCheck && isDemoTenantCheck()) return;
       const cats: Category[] = [];
-      snap.forEach(d => cats.push(d.data() as Category));
-      cats.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+      snap.forEach(d => cats.push({ ...(d.data() as Category), id: d.id }));
+      cats.sort((a, b) => ((a as any).sortOrder ?? (a as any).order ?? 0) - ((b as any).sortOrder ?? (b as any).order ?? 0));
       this.categories.set(cats);
-    });
+    },
+     (err) => console.error(`[InventorySync] Categories error for ${tenantId}:`, err));
     this.activeListeners.push(unsubCat);
 
-    // 3. Sync Raw Materials (Filtered strictly by tenantId & storeId)
+    // 2. Sync Modifier Groups (Strict Multi-Tenant Scoping)
+    const modQuery = query(
+      collection(this.db, 'modifier_groups'),
+      where('tenantId', '==', tenantId),
+      where('storeId', '==', storeId)
+    );
+    const unsubMod = onSnapshot(modQuery, (snap) => {
+      const groups: ModifierGroup[] = [];
+      snap.forEach(d => groups.push({ ...(d.data() as ModifierGroup), id: d.id }));
+      if ((this as any).modifierGroups?.set) {
+        (this as any).modifierGroups.set(groups);
+      }
+    }, (err) => console.error(`[InventorySync] Modifier groups error for ${tenantId}:`, err));
+    this.activeListeners.push(unsubMod);
+
+    // 3. Sync Products (Filtered strictly by tenantId & storeId)
+    const prodQuery = query(
+      collection(this.db, 'products'),
+      where('tenantId', '==', tenantId),
+      where('storeId', '==', storeId)
+    );
+    const unsubProd = onSnapshot(prodQuery, (snap) => {
+      const prods: Product[] = [];
+      snap.forEach(d => prods.push({ ...(d.data() as Product), id: d.id }));
+      this.products.set(prods);
+    }, (err) => console.error(`[InventorySync] Products error for ${tenantId}:`, err));
+    this.activeListeners.push(unsubProd);
+
+    // 4. Sync Raw Materials (Filtered strictly by tenantId & storeId)
     const matQuery = query(
       collection(this.db, 'rawMaterials'),
       where('tenantId', '==', tenantId),
       where('storeId', '==', storeId)
     );
     const unsubMat = onSnapshot(matQuery, (snap) => {
-      if (isDemoTenantCheck && isDemoTenantCheck()) return;
       const mats: RawMaterial[] = [];
-      snap.forEach(d => mats.push(d.data() as RawMaterial));
+      snap.forEach(d => mats.push({ ...(d.data() as RawMaterial), id: d.id }));
       this.rawMaterials.set(mats);
-    });
+    }, (err) => console.error(`[InventorySync] Raw materials error for ${tenantId}:`, err));
     this.activeListeners.push(unsubMat);
 
-    // 4. Sync Spoilage Logs (Filtered strictly by tenantId & storeId)
+    // 5. Sync Spoilage Logs (Filtered strictly by tenantId & storeId)
     const spoilQuery = query(
       collection(this.db, 'spoilageLogs'),
       where('tenantId', '==', tenantId),
       where('storeId', '==', storeId)
     );
     const unsubSpoil = onSnapshot(spoilQuery, (snap) => {
-      if (isDemoTenantCheck && isDemoTenantCheck()) return;
       const logs: SpoilageLog[] = [];
-      snap.forEach(d => logs.push(d.data() as SpoilageLog));
+      snap.forEach(d => logs.push({ ...(d.data() as SpoilageLog), id: d.id }));
       logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       this.spoilageLogs.set(logs);
-    });
+    }, (err) => console.error(`[InventorySync] Spoilage logs error for ${tenantId}:`, err));
     this.activeListeners.push(unsubSpoil);
   }
 

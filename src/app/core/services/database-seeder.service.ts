@@ -153,7 +153,6 @@ export class DatabaseSeederService {
       }
 
       await batch.commit();
-      console.log('✅ Client seed data successfully written to Firestore!');
       return { success: true, message: 'Τα αρχικά δεδομένα πελάτη δημιουργήθηκαν επιτυχώς στο Firestore!' };
     } catch (error: any) {
       console.error('❌ Firestore Seeding Error:', error);

@@ -5,7 +5,8 @@
         
         <!-- TITLE & BACK BUTTON -->
         <div class="flex items-center gap-3 shrink-0">
-          <a routerLink="/floor-plan" class="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs no-underline flex items-center gap-1.5 transition-all">
+          <a [routerLink]="['/t', posService.tenantContext.currentTenantId(), 'floor-plan']"
+           class="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs no-underline flex items-center gap-1.5 transition-all">
             <span>⬅️</span>
             <span class="hidden sm:inline">Πλάνο</span>
           </a>

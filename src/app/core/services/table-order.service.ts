@@ -1,5 +1,3 @@
-// src/app/core/services/table-order.service.ts
-
 import { Injectable, signal, computed, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { 
@@ -9,7 +7,8 @@ import {
   setDoc, 
   deleteDoc, 
   onSnapshot, 
-  deleteField, 
+  query,
+  where,
   Timestamp,
   Unsubscribe
 } from 'firebase/firestore';
@@ -41,13 +40,11 @@ function normalizeKey(val?: string | null): string {
   return String(val).trim().toLowerCase().replace(/[\s_-]+/g, '');
 }
 
-// 🛡️ Bulletproof payload sanitizer that preserves deleteField() and catches NaN errors
 function safeFirestorePayload(obj: any): any {
   if (obj === null || obj === undefined) return obj;
   if (typeof obj === 'number') return isNaN(obj) ? 0 : obj;
   if (typeof obj !== 'object') return obj;
   
-  // Preserve Firestore FieldValue operations (like deleteField)
   if (obj && typeof obj === 'object' && obj.constructor?.name === 'FieldValue') {
     return obj;
   }
@@ -96,7 +93,7 @@ export class TableOrderService {
   private knownItemStatusMap = new Map<string, ItemPreparationStatus>();
   private isInitialTablesSync = true;
 
-  // --- SAFE OCCUPIED TABLES COMPUTATION ---
+  // Occupied Tables Computation
   public occupiedTables = computed(() => 
     this.tables().filter(t => {
       const hasActiveItems = Boolean(
@@ -110,7 +107,7 @@ export class TableOrderService {
     })
   );
 
-  // --- SAFE TOTAL LIVE FLOOR REVENUE COMPUTATION ---
+  // Live Floor Revenue Computation
   public totalLiveFloorRevenue = computed(() => 
     this.tables().reduce((acc, t) => {
       const items = t.activeOrder?.items || [];
@@ -134,20 +131,10 @@ export class TableOrderService {
   );
 
   public getActiveTenantAndStore(): { tenantId: string; storeId: string } {
-    const tenantId = 
-      localStorage.getItem('active_tenant_id') ||
-      (this.tenantContext as any).currentTenantId?.() || 
-      (this.tenantContext as any).tenantId?.() || 
-      'coffee-shop-demo';
-
-    const storeId = 
-      localStorage.getItem('active_store_id') ||
-      (this.tenantContext as any).currentStoreId?.() || 
-      (this.tenantContext as any).activeStoreId?.() || 
-      (this.tenantContext as any).storeId?.() || 
-      'store-1';
-
-    return { tenantId, storeId };
+    return {
+      tenantId: this.tenantContext.currentTenantId(),
+      storeId: this.tenantContext.currentStoreId()
+    };
   }
 
   public getInitialDefaultTables(tenantId: string, storeId: string): Table[] {
@@ -162,112 +149,115 @@ export class TableOrderService {
     ];
   }
 
+  /**
+   * Initializes real-time sync with STRICT server-side Firestore query constraints
+   */
   public initFirestoreSync(dbInstance: Firestore | null, getCurrentEmployeeFn: () => Employee | null): void {
     if (!dbInstance) return;
     this.db = dbInstance;
 
     if (this.activeTablesUnsub) {
       this.activeTablesUnsub();
+      this.activeTablesUnsub = null;
     }
 
-    this.activeTablesUnsub = onSnapshot(collection(this.db, 'tables'), async (snap) => {
-      const activeEmp = getCurrentEmployeeFn();
-      const currentTenant = activeEmp?.tenantId || this.getActiveTenantAndStore().tenantId;
-      const currentStore = activeEmp?.storeId || this.getActiveTenantAndStore().storeId;
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
 
-      const targetTenant = normalizeKey(currentTenant);
-      const targetStore = normalizeKey(currentStore);
+    // STRICT SERVER-SIDE QUERY: Only fetch tables belonging to this tenant and store
+    const tablesQuery = query(
+      collection(this.db, 'tables'),
+      where('tenantId', '==', tenantId),
+      where('storeId', '==', storeId)
+    );
 
-      const cloudTableMap = new Map<string, Table>();
+    this.activeTablesUnsub = onSnapshot(tablesQuery, async (snap) => {
+      const tableList: Table[] = [];
       const newlyServedItems: { tableId: string; tableNumber: any; zone: string; itemSummary: string }[] = [];
       const extractedActiveOrders: ActiveOrder[] = [];
 
       snap.forEach(docSnap => {
         const rawTable = docSnap.data() as any;
         const tableId = docSnap.id;
-        
-        const docTenant = normalizeKey(rawTable.tenantId);
-        const docStore = normalizeKey(rawTable.storeId);
 
-        // Allow match if tenant matches OR if legacy table without explicit tenant
-        const matchesTenant = !docTenant || docTenant === targetTenant;
-        const matchesStore = !docStore || docStore === targetStore || docStore === 'all';
+        const hasActiveOrderItems = Boolean(
+          rawTable.activeOrder?.items && 
+          rawTable.activeOrder.items.length > 0
+        );
+        const hasPositiveTotal = Number(rawTable.currentTotal || rawTable.activeOrder?.grandTotal || 0) > 0;
+        const isExplicitlyFree = rawTable.status === 'FREE' && !hasActiveOrderItems && !hasPositiveTotal;
 
-        if (matchesTenant && matchesStore) {
-          const hasActiveOrderItems = Boolean(
-            rawTable.activeOrder?.items && 
-            rawTable.activeOrder.items.length > 0
-          );
-          const hasPositiveTotal = Number(rawTable.currentTotal || rawTable.activeOrder?.grandTotal || 0) > 0;
-          const isExplicitlyFree = rawTable.status === 'FREE' && !hasActiveOrderItems && !hasPositiveTotal;
+        const activeStatus = isExplicitlyFree 
+          ? 'FREE' 
+          : (rawTable.status === 'BILL_PRINTED' ? 'BILL_PRINTED' : (rawTable.status === 'RESERVED' ? 'RESERVED' : 'OCCUPIED'));
 
-          const activeStatus = isExplicitlyFree 
-            ? 'FREE' 
-            : (rawTable.status === 'BILL_PRINTED' ? 'BILL_PRINTED' : (rawTable.status === 'RESERVED' ? 'RESERVED' : 'OCCUPIED'));
+        const t: Table = {
+          ...rawTable,
+          id: tableId,
+          tenantId: rawTable.tenantId || tenantId,
+          storeId: rawTable.storeId || storeId,
+          number: rawTable.number ?? rawTable.tableNumber ?? '1',
+          tableNumber: rawTable.number ?? rawTable.tableNumber ?? '1',
+          status: activeStatus,
+          currentTotal: isExplicitlyFree ? 0 : Number(rawTable.currentTotal || rawTable.activeOrder?.grandTotal || 0),
+          activeOrder: isExplicitlyFree ? undefined : rawTable.activeOrder,
+          activeOrderId: isExplicitlyFree ? undefined : rawTable.activeOrderId,
+          waiterId: isExplicitlyFree ? undefined : rawTable.waiterId,
+          waiterName: isExplicitlyFree ? undefined : rawTable.waiterName,
+          assignedWaiterId: isExplicitlyFree ? undefined : rawTable.assignedWaiterId,
+          assignedWaiterName: isExplicitlyFree ? undefined : rawTable.assignedWaiterName,
+          reservation: rawTable.reservation || undefined
+        };
 
-          const t: Table = {
-            ...rawTable,
-            id: tableId,
-            tenantId: rawTable.tenantId || currentTenant,
-            storeId: rawTable.storeId || currentStore,
-            number: rawTable.number ?? rawTable.tableNumber ?? '1',
-            tableNumber: rawTable.number ?? rawTable.tableNumber ?? '1',
-            status: activeStatus,
-            currentTotal: isExplicitlyFree ? 0 : Number(rawTable.currentTotal || rawTable.activeOrder?.grandTotal || 0),
-            activeOrder: isExplicitlyFree ? undefined : rawTable.activeOrder,
-            activeOrderId: isExplicitlyFree ? undefined : rawTable.activeOrderId,
-            waiterId: isExplicitlyFree ? undefined : rawTable.waiterId,
-            waiterName: isExplicitlyFree ? undefined : rawTable.waiterName,
-            assignedWaiterId: isExplicitlyFree ? undefined : rawTable.assignedWaiterId,
-            assignedWaiterName: isExplicitlyFree ? undefined : rawTable.assignedWaiterName,
-            reservation: rawTable.reservation || undefined
-          };
-          cloudTableMap.set(t.id, t);
+        tableList.push(t);
 
-          if (t.activeOrder) {
-            extractedActiveOrders.push(t.activeOrder);
-          }
+        if (t.activeOrder) {
+          extractedActiveOrders.push(t.activeOrder);
+        }
 
-          if (rawTable.activeOrder && rawTable.activeOrder.items) {
-            for (const item of rawTable.activeOrder.items) {
-              const prevStatus = this.knownItemStatusMap.get(item.id);
-              this.knownItemStatusMap.set(item.id, item.status);
+        if (rawTable.activeOrder && rawTable.activeOrder.items) {
+          for (const item of rawTable.activeOrder.items) {
+            const prevStatus = this.knownItemStatusMap.get(item.id);
+            this.knownItemStatusMap.set(item.id, item.status);
 
-              if (!this.isInitialTablesSync && prevStatus && prevStatus !== 'SERVED' && item.status === 'SERVED') {
-                newlyServedItems.push({
-                  tableId: rawTable.id,
-                  tableNumber: rawTable.number ?? rawTable.tableNumber ?? 0,
-                  zone: rawTable.zone || rawTable.section || 'Σάλα',
-                  itemSummary: `${item.quantity}x ${item.productName || item.name || 'Προϊόν'}`
-                });
-              }
+            if (!this.isInitialTablesSync && prevStatus && prevStatus !== 'SERVED' && item.status === 'SERVED') {
+              newlyServedItems.push({
+                tableId: rawTable.id,
+                tableNumber: rawTable.number ?? rawTable.tableNumber ?? 0,
+                zone: rawTable.zone || rawTable.section || 'Σάλα',
+                itemSummary: `${item.quantity}x ${item.productName || item.name || 'Προϊόν'}`
+              });
             }
           }
         }
       });
 
-      let mergedList: Table[] = [];
-      if (cloudTableMap.size > 0) {
-        cloudTableMap.forEach(cloudTable => mergedList.push(cloudTable));
-      } else {
-        // Auto-seed default tables to Firestore so newly switched stores are never empty
-        const defaultTables = this.getInitialDefaultTables(currentTenant, currentStore);
-        mergedList = [...defaultTables];
+      // 🛡️ AFTER loop completes: Check if this store has 0 tables in Firestore
+      if (tableList.length === 0 && this.db) {
+        const defaultTables = this.getInitialDefaultTables(tenantId, storeId);
         
-        if (this.db) {
-          for (const tbl of defaultTables) {
-            await setDoc(doc(this.db, 'tables', tbl.id), safeFirestorePayload(tbl), { merge: true }).catch(() => {});
-          }
+        // 1. Immediately display the local default tables in the signal
+        this.tables.set(defaultTables);
+
+        // 2. Commit all documents in parallel
+        try {
+          await Promise.all(
+            defaultTables.map(tbl => 
+              setDoc(doc(this.db!, 'tables', tbl.id), safeFirestorePayload(tbl), { merge: true })
+            )
+          );
+        } catch (err) {
+          console.error('[TableOrderService] Error seeding default tables:', err);
         }
+      } else {
+        tableList.sort((a, b) => {
+          const valA = String(a.number ?? a.tableNumber ?? '');
+          const valB = String(b.number ?? b.tableNumber ?? '');
+          return valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+        });
+
+        this.tables.set(tableList);
       }
 
-      mergedList.sort((a, b) => {
-        const valA = String(a.number ?? a.tableNumber ?? '');
-        const valB = String(b.number ?? b.tableNumber ?? '');
-        return valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
-      });
-
-      this.tables.set(mergedList);
       this.activeOrders.set(extractedActiveOrders);
 
       if (this.isInitialTablesSync) {
@@ -277,7 +267,7 @@ export class TableOrderService {
           this.addReadyNotification(notif);
         }
       }
-    }, (err) => console.error('Tables sync warning:', err));
+    }, (err) => console.error(`[Firestore/Security] Tables sync error for ${tenantId}:`, err));
   }
 
   private addReadyNotification(notif: { tableId: string; tableNumber: any; zone: string; itemSummary: string }): void {
@@ -294,7 +284,7 @@ export class TableOrderService {
 
     setTimeout(() => {
       this.dismissNotification(fullNotif.id);
-    }, 3000);
+    }, 4000);
   }
 
   public clearAllNotifications(): void {
@@ -307,7 +297,7 @@ export class TableOrderService {
     );
   }
 
-  // 🛡️ ALPHANUMERIC-COMPATIBLE ADD TABLE
+  // Add Table
   public addTable(data: { number: string | number; seats?: number; section?: string; zone?: string }): { success: boolean; message: string; table?: Table } {
     const identifier = String(data.number ?? '').trim();
     if (!identifier) {
@@ -356,7 +346,7 @@ export class TableOrderService {
   }
 
   public updateTable(tableId: string, data: Partial<Table>): void {
-    const existing = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
+    const existing = this.tables().find(t => t.id === tableId);
     if (!existing) return;
 
     const num = data.number ?? data.tableNumber ?? existing.number ?? existing.tableNumber;
@@ -381,7 +371,7 @@ export class TableOrderService {
   }
 
   public deleteTable(tableId: string): { success: boolean; message: string } {
-    const target = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
+    const target = this.tables().find(t => t.id === tableId);
     if (!target) return { success: false, message: 'Το τραπέζι δεν βρέθηκε.' };
 
     if (target.status === 'OCCUPIED' || target.status === 'BILL_PRINTED') {
@@ -409,14 +399,13 @@ export class TableOrderService {
   ): void {
     const { tenantId, storeId } = this.getActiveTenantAndStore();
 
-    const table = this.tables().find(t => t.id === tableId || String(t.number) === String(tableId) || String(t.tableNumber) === String(tableId));
+    const table = this.tables().find(t => t.id === tableId);
     if (!table) {
-      console.error('Table match failed for tableId:', tableId);
+      console.error('[TableOrderService] Table not found for tableId:', tableId);
       return;
     }
 
     const actualModifiers = modifiers.length > 0 ? modifiers : ((product as any).selectedModifiers || []);
-    
     const pPrice = Number(product.price) || 0;
     const extraCost = actualModifiers.reduce((acc: number, m: any) => acc + (Number(m.priceExtra || m.price) || 0), 0);
     const finalPrice = Number((pPrice + extraCost).toFixed(2));
@@ -445,14 +434,12 @@ export class TableOrderService {
 
     const currentItems = [...(existingOrder.items || [])];
 
-    // Helper to serialize modifiers for strict comparison
     const getModKey = (mods: OrderModifier[] = []) =>
       mods.map(m => String(m.optionId || m.id || m.name || m.optionName || '')).sort().join('|');
 
     const incomingModKey = getModKey(actualModifiers);
     const cleanNotes = (notes || '').trim();
 
-    // 🔍 Find if the exact item exists as unsent (PENDING)
     const existingIndex = currentItems.findIndex(i =>
       i.productId === product.id &&
       i.status === 'PENDING' &&
@@ -463,7 +450,6 @@ export class TableOrderService {
     let updatedItems: TableOrderItem[];
 
     if (existingIndex > -1) {
-      // ➕ Merge: Increment quantity on existing line
       const existing = currentItems[existingIndex];
       const newQty = Number(existing.quantity || 1) + 1;
       const updatedExisting: TableOrderItem = {
@@ -472,7 +458,6 @@ export class TableOrderService {
       };
       updatedItems = currentItems.map((item, idx) => idx === existingIndex ? updatedExisting : item);
     } else {
-      // 🆕 Create new line
       const newItem: TableOrderItem = {
         id: `ITEM-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         storeId,
@@ -494,7 +479,6 @@ export class TableOrderService {
     }
 
     const activeItems = updatedItems.filter(i => i.status !== 'VOIDED');
-    
     const grandTotal = Number(activeItems.reduce((acc, i) => acc + (Number(i.finalItemPrice) * Number(i.quantity)), 0).toFixed(2));
     const subtotalNet = Number((grandTotal / 1.13).toFixed(2));
     const totalTax = Number((grandTotal - subtotalNet).toFixed(2));
@@ -520,7 +504,7 @@ export class TableOrderService {
   }
 
   public async updateTableOrderItemQuantity(tableId: string, itemId: string, delta: number): Promise<void> {
-    const table = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
+    const table = this.tables().find(t => t.id === tableId);
     if (!table || !table.activeOrder) return;
 
     const existingItems = table.activeOrder.items;
@@ -568,11 +552,10 @@ export class TableOrderService {
   }
 
   public removeOrderItem(tableId: string, itemId: string): void {
-    const table = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
+    const table = this.tables().find(t => t.id === tableId);
     if (!table || !table.activeOrder) return;
 
     const updatedItems = table.activeOrder.items.filter(item => item.id !== itemId);
-    
     const activeItems = updatedItems.filter(i => i.status !== 'VOIDED');
     const grandTotal = Number(activeItems.reduce((acc, i) => acc + (Number(i.finalItemPrice) * Number(i.quantity)), 0).toFixed(2));
     const subtotalNet = Number((grandTotal / 1.13).toFixed(2));
@@ -599,7 +582,7 @@ export class TableOrderService {
   }
 
   public async voidTableOrderItem(tableId: string, itemId: string, reason: string = 'Ακύρωση από σερβιτόρο'): Promise<void> {
-    const table = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
+    const table = this.tables().find(t => t.id === tableId);
     if (!table || !table.activeOrder) return;
 
     const targetItem = table.activeOrder.items.find(i => i.id === itemId);
@@ -642,7 +625,7 @@ export class TableOrderService {
   }
 
   public sendOrderToKitchen(tableId: string): void {
-    const table = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
+    const table = this.tables().find(t => t.id === tableId);
     if (!table || !table.activeOrder) return;
 
     const updatedItems = table.activeOrder.items.map(i => 
@@ -685,7 +668,7 @@ export class TableOrderService {
   }
 
   public bumpOrderItemStatus(tableId: string, itemId: string): void {
-    const table = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
+    const table = this.tables().find(t => t.id === tableId);
     if (!table || !table.activeOrder) return;
 
     const updatedItems = table.activeOrder.items.map(item => {
@@ -707,7 +690,7 @@ export class TableOrderService {
   }
 
   public async markTableBillPrinted(tableId: string): Promise<void> {
-    const table = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
+    const table = this.tables().find(t => t.id === tableId);
     if (!table) return;
 
     const updatedT: Table = { ...table, status: 'BILL_PRINTED' };
@@ -730,7 +713,7 @@ export class TableOrderService {
     currentEmp: Employee | null, 
     onPaymentSuccessFn?: (saleRecord: SaleRecord) => void
   ): Promise<void> {
-    const table = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
+    const table = this.tables().find(t => t.id === tableId);
     if (!table) return;
 
     if (table.activeOrder && table.activeOrder.items) {
@@ -789,7 +772,6 @@ export class TableOrderService {
       onPaymentSuccessFn(saleRecord);
     }
 
-    // 🛡️ Explicit clean state object: null out all order properties
     const cleanFreedTableData = {
       id: table.id,
       number: tableIdentifier,
@@ -812,11 +794,9 @@ export class TableOrderService {
       reservation: null
     };
 
-    // Update local Signal
     const updatedTables = this.tables().map(t => t.id === table.id ? (cleanFreedTableData as any) : t);
     this.tables.set(updatedTables);
 
-    // 🛡️ Direct Firestore overwrite (DO NOT merge with old order fields)
     if (this.db) {
       try {
         await setDoc(doc(this.db, 'tables', table.id), cleanFreedTableData);
@@ -827,7 +807,7 @@ export class TableOrderService {
   }
 
   public async reserveTable(tableId: string, info: TableReservationInfo): Promise<void> {
-    const table = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
+    const table = this.tables().find(t => t.id === tableId);
     if (!table) return;
 
     const updated: Table = {
@@ -844,7 +824,7 @@ export class TableOrderService {
   }
 
   public async cancelReservation(tableId: string): Promise<void> {
-    const table = this.tables().find(t => t.id === tableId || String(t.number) === tableId);
+    const table = this.tables().find(t => t.id === tableId);
     if (!table) return;
 
     const updated: Table = {
@@ -874,6 +854,11 @@ export class TableOrderService {
 
     if (!source || !target || !source.activeOrder) {
       return { success: false, message: 'Μη έγκυρο τραπέζι πηγής ή προορισμού.' };
+    }
+
+    // Tenant check: ensure source and target are strictly in the same tenant and store
+    if (source.tenantId !== target.tenantId || source.storeId !== target.storeId) {
+      return { success: false, message: 'Απαγορεύεται η συγχώνευση τραπεζιών διαφορετικών καταστημάτων.' };
     }
 
     const sourceItems = source.activeOrder.items || [];
@@ -948,39 +933,110 @@ export class TableOrderService {
     tableId: string, 
     itemIdsToSettle: string[], 
     method: 'CASH' | 'CARD',
-    currentEmp: any = null
+    currentEmp: Employee | null = null,
+    onPaymentSuccessFn?: (saleRecord: SaleRecord) => void
   ): Promise<{ success: boolean; remainingTotal: number }> {
     const table = this.tables().find(t => t.id === tableId);
     if (!table || !table.activeOrder) return { success: false, remainingTotal: 0 };
 
     const allItems = table.activeOrder.items || [];
+    const itemsToPay = allItems.filter(i => itemIdsToSettle.includes(i.id) && i.status !== 'VOIDED');
     const remainingItems = allItems.filter(i => !itemIdsToSettle.includes(i.id));
 
+    if (itemsToPay.length === 0) {
+      return { success: false, remainingTotal: Number(table.currentTotal || 0) };
+    }
+
+    // 1. Calculate financial totals for the items being settled now
+    const paidGrandTotal = Number(itemsToPay.reduce((acc, i) => acc + (Number(i.finalItemPrice) * Number(i.quantity)), 0).toFixed(2));
+    const paidSubtotalNet = Number((paidGrandTotal / 1.13).toFixed(2));
+    const paidTotalTax = Number((paidGrandTotal - paidSubtotalNet).toFixed(2));
+
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+    const tableIdentifier = table.number ?? table.tableNumber ?? '1';
+
+    // 2. Generate an authoritative SaleRecord for the settled partition
+    const partialSaleRecord: SaleRecord = {
+      id: `SALE-PARTIAL-${Date.now()}`,
+      tenantId: currentEmp?.tenantId || table.tenantId || tenantId,
+      storeId: currentEmp?.storeId || table.storeId || storeId,
+      orderId: table.activeOrder.orderId,
+      tableId: table.id,
+      tableNumber: tableIdentifier as any,
+      waiterId: currentEmp?.id || 'EMP-SYSTEM',
+      waiterName: currentEmp?.name || 'Σερβιτόρος',
+      paymentMethod: method,
+      items: itemsToPay,
+      subtotalNet: paidSubtotalNet,
+      totalTax: paidTotalTax,
+      grandTotal: paidGrandTotal,
+      timestamp: new Date().toISOString()
+    };
+
+    if (this.db) {
+      try {
+        await setDoc(doc(this.db, 'sales', partialSaleRecord.id), safeFirestorePayload(partialSaleRecord));
+      } catch (e) {
+        console.error('Error logging partial sale record:', e);
+      }
+    }
+
+    // 3. Callback to credit the waiter's active vault session
+    if (typeof onPaymentSuccessFn === 'function') {
+      onPaymentSuccessFn(partialSaleRecord);
+    }
+
+    // 4. If no items remain, free the table completely
     if (remainingItems.length === 0 || remainingItems.every(i => i.status === 'VOIDED')) {
-      await this.settleTablePayment(tableId, method, currentEmp, undefined);
+      const cleanFreedTable = {
+        ...table,
+        status: 'FREE' as const,
+        currentTotal: 0,
+        activeOrder: null,
+        activeOrderId: null,
+        waiterId: null,
+        waiterName: null,
+        assignedWaiterId: null,
+        assignedWaiterName: null,
+        reservation: null
+      };
+
+      this.tables.update(list => list.map(t => t.id === tableId ? (cleanFreedTable as any) : t));
+
+      if (this.db) {
+        await setDoc(doc(this.db, 'tables', tableId), cleanFreedTable);
+      }
+
       return { success: true, remainingTotal: 0 };
     }
 
-    const subtotalNet = remainingItems.reduce((acc, i) => i.status !== 'VOIDED' ? acc + (i.unitPrice * i.quantity) : acc, 0);
-    const grandTotal = remainingItems.reduce((acc, i) => i.status !== 'VOIDED' ? acc + (i.finalItemPrice * i.quantity) : acc, 0);
-    const totalTax = grandTotal - subtotalNet;
+    // 5. Update table with remaining unpaid items
+    const remainingGrandTotal = Number(remainingItems.reduce((acc, i) => i.status !== 'VOIDED' ? acc + (i.finalItemPrice * i.quantity) : acc, 0).toFixed(2));
+    const remainingSubtotalNet = Number((remainingGrandTotal / 1.13).toFixed(2));
+    const remainingTotalTax = Number((remainingGrandTotal - remainingSubtotalNet).toFixed(2));
 
-    this.tables.update((list: Table[]) =>
-      list.map((tbl: Table): Table => 
-        tbl.id === tableId ? ({
-          ...tbl,
-          currentTotal: grandTotal,
-          activeOrder: {
-            ...tbl.activeOrder!,
-            items: remainingItems,
-            subtotalNet,
-            totalTax,
-            grandTotal
-          } as any
-        } as Table) : tbl
-      )
-    );
+    const updatedTable: Table = {
+      ...table,
+      currentTotal: remainingGrandTotal,
+      activeOrder: {
+        ...table.activeOrder,
+        items: remainingItems,
+        subtotalNet: remainingSubtotalNet,
+        totalTax: remainingTotalTax,
+        grandTotal: remainingGrandTotal
+      } as any
+    };
 
-    return { success: true, remainingTotal: grandTotal };
+    this.tables.update(list => list.map(t => t.id === tableId ? updatedTable : t));
+
+    if (this.db) {
+      try {
+        await setDoc(doc(this.db, 'tables', tableId), safeFirestorePayload(updatedTable));
+      } catch (e) {
+        console.error('Error updating remaining items on table:', e);
+      }
+    }
+
+    return { success: true, remainingTotal: remainingGrandTotal };
   }
 }
