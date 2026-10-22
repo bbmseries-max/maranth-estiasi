@@ -18,10 +18,12 @@
     "@angular/forms": "^22.0.0",
     "@angular/platform-browser": "^22.0.0",
     "@angular/router": "^22.0.0",
+    "@sentry/angular": "^11.8.0",
+    "@sentry/node": "^11.8.0",
     "firebase": "^12.17.1",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
-    "zone.js": "^0.16.2"
+    "zone.js": "^0.16.3"
   },
   "devDependencies": {
     "@angular/build": "^22.0.8",
