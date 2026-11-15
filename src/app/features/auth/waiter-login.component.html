@@ -8,6 +8,11 @@
       <div class="flex flex-col items-center mb-6 text-center">
         <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-400 flex items-center justify-center text-3xl shadow-lg mb-2">
           {{ activeShop()?.icon || '☕' }}
+          @if (tenantContext.trialDaysRemaining() !== null) {
+  <span class="px-2.5 py-0.5 rounded-lg bg-amber-950/90 border border-amber-500/60 text-xs font-mono font-bold text-amber-300">
+    ⏳ Trial: {{ tenantContext.trialDaysRemaining() }} ημ.
+  </span>
+}
         </div>
         <h1 class="text-2xl font-black tracking-tight text-white m-0">{{ activeShop()?.name }}</h1>
         <div class="flex items-center gap-2 mt-1">

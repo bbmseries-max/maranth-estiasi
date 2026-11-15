@@ -41,14 +41,12 @@ export class WaiterLoginComponent implements OnInit {
     this.errorMessage.set('');
 
     // Ensure tenant context matches the authoritative route slug
-    const routeSlug = this.route.snapshot.paramMap.get('tenantSlug') || 
-                      this.route.parent?.snapshot.paramMap.get('tenantSlug');
+    const routeSlug =
+      this.route.snapshot.paramMap.get('tenantSlug') ||
+      this.route.parent?.snapshot.paramMap.get('tenantSlug');
 
-    if (routeSlug && routeSlug !== this.tenantContext.currentTenantId()) {
-      const store = this.tenantContext.registeredStores.find(s => s.tenantId === routeSlug);
-      if (store) {
-        this.tenantContext.setTenantAndStore(store.tenantId, store.storeId);
-      }
+    if (routeSlug && routeSlug.trim().toLowerCase() !== this.tenantContext.currentTenantId()) {
+      this.tenantContext.setTenantAndStore(routeSlug);
     }
 
     this.step.set('PIN_ENTRY');

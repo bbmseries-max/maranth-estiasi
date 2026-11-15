@@ -3,6 +3,14 @@
 import { Injectable, signal, computed, inject } from '@angular/core';
 import { Firestore, doc, onSnapshot, Unsubscribe } from '@angular/fire/firestore';
 
+export interface StoreSubscriptionSnapshot {
+  tier?: string;
+  status?: string;
+  activatedAt?: string | null;
+  validUntil?: string | null;
+  trialStartsOnFirstOpen?: boolean;
+}
+
 export interface StoreProfile {
   tenantId: string;
   storeId: string;
@@ -16,6 +24,8 @@ export interface StoreProfile {
   address?: string;
   phone?: string;
   isDemo?: boolean;
+  isActive?: boolean;
+  subscription?: StoreSubscriptionSnapshot;
 }
 
 @Injectable({
@@ -46,11 +56,15 @@ export class TenantContextService {
       city: 'Live Demo',
       icon: '✨',
       themeColor: 'sky',
-      afm: '999999999',
+      afm: '',
       doy: 'Α΄ Αθηνών',
       address: 'Λεωφ. Δημοκρατίας 1, Αθήνα',
       phone: '210 0000000',
-      isDemo: true
+      isDemo: true,
+      subscription: {
+        tier: 'PUBLIC_DEMO_7D',
+        status: 'ACTIVE'
+      }
     },
     {
       tenantId: 'beach-bar-test',
@@ -90,9 +104,9 @@ export class TenantContextService {
     }
 
     // 2. Fallback to built-in registeredStores if found
-    const staticMatch = this.registeredStores.find(
-      s => s.tenantId === tenant && (!store || s.storeId === store)
-    ) || this.registeredStores.find(s => s.tenantId === tenant);
+    const staticMatch =
+      this.registeredStores.find(s => s.tenantId === tenant && (!store || s.storeId === store)) ||
+      this.registeredStores.find(s => s.tenantId === tenant);
 
     if (staticMatch) {
       return staticMatch;
@@ -117,6 +131,40 @@ export class TenantContextService {
       address: '',
       phone: ''
     };
+  });
+
+  // Remaining days for active 7-day public demo (per-device) or named client 7-day trial
+  public readonly trialDaysRemaining = computed<number | null>(() => {
+    const store = this.activeStore();
+    const slug = store.tenantId?.toLowerCase();
+    if (!slug) return null;
+
+    const sub = store.subscription;
+    const tier = String(sub?.tier || '').toUpperCase();
+
+    // 1. Per-device 7-day clock (PUBLIC_DEMO_7D or coffee-shop-demo)
+    if (tier === 'PUBLIC_DEMO_7D' || slug === 'coffee-shop-demo') {
+      const key = `maranth_estiasi_device_trial_until_${slug}`;
+      const raw = typeof window !== 'undefined' ? window.localStorage.getItem(key) : null;
+      if (raw) {
+        const expiryMs = Number(raw);
+        if (!Number.isNaN(expiryMs) && expiryMs > 0) {
+          return Math.max(0, Math.ceil((expiryMs - Date.now()) / (1000 * 60 * 60 * 24)));
+        }
+      }
+      return 7;
+    }
+
+    // 2. Server-stored 7-day trial validUntil
+    if (sub?.validUntil) {
+      const expiryMs = new Date(sub.validUntil).getTime();
+      if (!Number.isNaN(expiryMs)) {
+        const days = Math.ceil((expiryMs - Date.now()) / (1000 * 60 * 60 * 24));
+        return days <= 7 ? Math.max(0, days) : null;
+      }
+    }
+
+    return null;
   });
 
   constructor() {
@@ -172,13 +220,14 @@ export class TenantContextService {
           doy: String(data['doy'] || '').trim(),
           address: String(data['address'] || '').trim(),
           phone: String(data['phone'] || data['contactPhone'] || '').trim(),
-          isDemo: tenantId === 'coffee-shop-demo'
+          isDemo: tenantId === 'coffee-shop-demo',
+          isActive: data['isActive'] !== false,
+          subscription: data['subscription'] || undefined
         };
 
         this.firestoreTenantProfile.set(profile);
         localStorage.setItem('active_tenant_profile', JSON.stringify(profile));
 
-        // Keep storeId aligned with Firestore document if not explicitly overridden
         if (data['storeId'] && this.currentStoreId() !== data['storeId']) {
           this.currentStoreId.set(data['storeId']);
           localStorage.setItem('active_store_id', data['storeId']);
