@@ -1,13 +1,11 @@
-
-
 export const environment = {
   production: false,
   firebase: {
-    apiKey: "YOUR_ACTUAL_API_KEY",
-    authDomain: "YOUR_ACTUAL_PROJECT.firebaseapp.com",
-    projectId: "YOUR_ACTUAL_PROJECT_ID",
-    storageBucket: "YOUR_ACTUAL_PROJECT.appspot.com",
-    messagingSenderId: "YOUR_ACTUAL_SENDER_ID",
-    appId: "YOUR_ACTUAL_APP_ID"
+    apiKey: "AIzaSyCOgBK1uQ4f_7lufn7rzmXgseeR09YVcRQ",
+    authDomain: "maranth-hub.firebaseapp.com",
+    projectId: "maranth-hub",
+    storageBucket: "maranth-hub.firebasestorage.app",
+    messagingSenderId: "550516097634",
+    appId: "1:550516097634:web:7369f45595b3dce8f4873b"
   }
 };

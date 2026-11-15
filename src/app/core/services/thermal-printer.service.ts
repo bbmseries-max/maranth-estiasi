@@ -14,13 +14,24 @@ export class ThermalPrinterService {
     const store = this.tenantContext.activeStore();
     const name = store?.name || 'Maranth Estiasi';
     const icon = store?.icon || '☕';
-    const city = store?.city ? ` - ${store.city}` : '';
+
+    const addressParts = [store?.address, store?.city].filter(Boolean);
+    const addressLine = addressParts.length > 0 ? addressParts.join(' • ') : '';
+
+    const taxParts: string[] = [];
+    if (store?.afm) taxParts.push(`ΑΦΜ: <strong>${store.afm}</strong>`);
+    if (store?.doy) taxParts.push(`ΔΟΥ: ${store.doy}`);
+    const taxLine = taxParts.join(' • ');
+
+    const phoneLine = store?.phone ? `Τηλ: ${store.phone}` : '';
 
     return `
       <div class="text-center">
         <div class="header-title">${icon} ${name.toUpperCase()}</div>
         <div style="font-size: 11px; font-weight: bold; margin-top: 2px;">${subtitle}</div>
-        <div style="font-size: 10px; color: #555;">${city}</div>
+        ${addressLine ? `<div style="font-size: 10px; color: #333; margin-top: 2px;">${addressLine}</div>` : ''}
+        ${taxLine ? `<div style="font-size: 10px; color: #111; margin-top: 1px;">${taxLine}</div>` : ''}
+        ${phoneLine ? `<div style="font-size: 10px; color: #444;">${phoneLine}</div>` : ''}
       </div>
     `;
   }
@@ -190,6 +201,16 @@ export class ThermalPrinterService {
           <div class="item-row font-bold">
             <span>ΣΥΝΟΛΟ ΦΠΑ:</span>
             <span>€${z.totalVatLiability.toFixed(2)}</span>
+          </div>
+          <div class="divider"></div>
+          <div class="text-center font-bold">--- ΑΝΑΛΥΣΗ myDATA (11.1 / 11.2) ---</div>
+          <div class="item-row">
+            <span>11.1 ΑΛΠ (Takeaway / Λιανική) [${(z as any).alp11_1Count || 0}]:</span>
+            <span>€${Number((z as any).alp11_1Total || 0).toFixed(2)}</span>
+          </div>
+          <div class="item-row">
+            <span>11.2 ΑΠΥ (Εστίαση / Τραπέζια) [${(z as any).apy11_2Count || 0}]:</span>
+            <span>€${Number((z as any).apy11_2Total || 0).toFixed(2)}</span>
           </div>
           <div class="divider"></div>
           <div class="text-center" style="margin-top: 15px; font-size: 10px;">

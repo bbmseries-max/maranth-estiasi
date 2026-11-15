@@ -1072,4 +1072,30 @@ export class TableOrderService {
 
     return { success: true, remainingTotal: remainingGrandTotal };
   }
+
+  private resolveMyDataFiscalClassification(table: Partial<Table>): {
+    serviceType: 'TAKEAWAY' | 'DINE_IN';
+    mydataInvoiceType: '11.1' | '11.2';
+    mydataIncomeClassification: 'category1_1' | 'category1_3';
+  } {
+    const isTakeaway =
+      String(table.section || '').toUpperCase() === 'TAKEAWAY' ||
+      String(table.zone || '').toLowerCase().includes('takeaway') ||
+      String(table.id || '').toLowerCase().includes('takeaway') ||
+      String(table.number ?? table.tableNumber ?? '') === '99';
+
+    if (isTakeaway) {
+      return {
+        serviceType: 'TAKEAWAY',
+        mydataInvoiceType: '11.1',
+        mydataIncomeClassification: 'category1_1'
+      };
+    }
+
+    return {
+      serviceType: 'DINE_IN',
+      mydataInvoiceType: '11.2',
+      mydataIncomeClassification: 'category1_3'
+    };
+  }
 }

@@ -42,12 +42,12 @@ import {
 } from '../modals';
 
 const DEFAULT_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyDnixK-3v_bAjCFhvB6diDNp6eXoC2V4_c",
-  authDomain: "maranth-estiasi.firebaseapp.com",
-  projectId: "maranth-estiasi",
-  storageBucket: "maranth-estiasi.firebasestorage.app",
-  messagingSenderId: "927547122917",
-  appId: "1:927547122917:web:7f6ab240c6e2f58967e00c"
+  apiKey: "AIzaSyCOgBK1uQ4f_7lufn7rzmXgseeR09YVcRQ",
+  authDomain: "maranth-hub.firebaseapp.com",
+  projectId: "maranth-hub",
+  storageBucket: "maranth-hub.firebasestorage.app",
+  messagingSenderId: "550516097634",
+  appId: "1:550516097634:web:7369f45595b3dce8f4873b"
 };
 
 function cleanUndefined(obj: any): any {
@@ -478,6 +478,7 @@ export class RestaurantPosService {
   }
 
   public logoutEmployee(): void {
+    const slug = this.getTenantSlug();
     localStorage.removeItem('current_employee');
     localStorage.removeItem('maranth_pos_employee');
     sessionStorage.clear();
@@ -486,7 +487,7 @@ export class RestaurantPosService {
       this.authShiftService.currentEmployee.set(null);
       this.authShiftService.activeWorkShift.set(null);
       this.activeVaultSession.set(null);
-      this.router.navigate(['/login'], { replaceUrl: true });
+      this.router.navigate(['/t', slug, 'login'], { replaceUrl: true });
     });
   }
 
@@ -1028,7 +1029,12 @@ export class RestaurantPosService {
     });
   }
 
-  public closeDayAndGenerateZReport(): DailyZReportSnapshot {
+  public closeDayAndGenerateZReport(): DailyZReportSnapshot & {
+    alp11_1Total?: number;
+    apy11_2Total?: number;
+    alp11_1Count?: number;
+    apy11_2Count?: number;
+  } {
     const emp = this.currentEmployee();
     const { tenantId, storeId } = this.getActiveTenantAndStore();
     const vat = this.vatBreakdown();
@@ -1038,15 +1044,43 @@ export class RestaurantPosService {
 
     // Aggregate cash and card strictly from the current business window
     const totalCash = activeWindow.reduce(
-      (sum, s) => sum + (s.paymentMethod === 'CASH' ? (s.grandTotal || 0) : 0), 
+      (sum, s) => sum + (s.paymentMethod === 'CASH' ? (s.grandTotal || 0) : 0),
       0
     );
     const totalCard = activeWindow.reduce(
-      (sum, s) => sum + (s.paymentMethod === 'CARD' ? (s.grandTotal || 0) : 0), 
+      (sum, s) => sum + (s.paymentMethod === 'CARD' ? (s.grandTotal || 0) : 0),
       0
     );
 
-    const snapshot: DailyZReportSnapshot = {
+    // AADE myDATA 11.1 (ΑΛΠ - Counter/Takeaway Goods) vs 11.2 (ΑΠΥ - Dine-In Table Service)
+    let alp11_1Total = 0;
+    let alp11_1Count = 0;
+    let apy11_2Total = 0;
+    let apy11_2Count = 0;
+
+    for (const sale of activeWindow) {
+      const explicitType = (sale as any).mydataInvoiceType;
+      const isTakeaway =
+        explicitType === '11.1' ||
+        (sale as any).serviceType === 'TAKEAWAY' ||
+        String(sale.tableNumber || '').toUpperCase() === 'TAKEAWAY' ||
+        String(sale.tableNumber || '') === '99';
+
+      if (isTakeaway) {
+        alp11_1Total += sale.grandTotal || 0;
+        alp11_1Count++;
+      } else {
+        apy11_2Total += sale.grandTotal || 0;
+        apy11_2Count++;
+      }
+    }
+
+    const snapshot: DailyZReportSnapshot & {
+      alp11_1Total?: number;
+      apy11_2Total?: number;
+      alp11_1Count?: number;
+      apy11_2Count?: number;
+    } = {
       id: `Z-REPORT-${Date.now()}`,
       tenantId: emp?.tenantId || tenantId,
       storeId: emp?.storeId || storeId,
@@ -1062,7 +1096,11 @@ export class RestaurantPosService {
       net24: vat.net24,
       vat24: vat.vat24,
       totalNetRevenue: vat.totalNet,
-      totalVatLiability: vat.totalVat
+      totalVatLiability: vat.totalVat,
+      alp11_1Total: Number(alp11_1Total.toFixed(2)),
+      alp11_1Count,
+      apy11_2Total: Number(apy11_2Total.toFixed(2)),
+      apy11_2Count
     };
 
     if (this.db) {
@@ -1072,10 +1110,13 @@ export class RestaurantPosService {
     }
 
     this.zReports.update(list => [snapshot, ...list]);
-    this.logAudit('Z_REPORT_CLOSED', `Έκδοση Z-Report. Τζίρος: €${snapshot.totalGrossRevenue.toFixed(2)}`);
+    this.logAudit(
+      'Z_REPORT_CLOSED',
+      `Έκδοση Z-Report. Τζίρος: €${snapshot.totalGrossRevenue.toFixed(2)} (11.1 ΑΛΠ: €${snapshot.alp11_1Total?.toFixed(2)} | 11.2 ΑΠΥ: €${snapshot.apy11_2Total?.toFixed(2)})`
+    );
 
     return snapshot;
-  }
+    }
 
   // Safe Guarded Reset
   public async resetDatabaseToDefaults(): Promise<void> {
