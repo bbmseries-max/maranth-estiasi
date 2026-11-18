@@ -28,7 +28,11 @@ export class FloorPlanComponent {
   public selectingVaultForSettlement = signal<{ tableId: string; method: 'CASH' | 'CARD' } | null>(null);
 
   public filteredTables = computed(() => {
-    const all = this.posService.tables().filter(t => t.id !== 'takeaway-counter' && t.zone !== 'Takeaway');
+    const all = this.posService.tables().filter(t =>
+      !t.id.endsWith('takeaway-counter') &&
+      t.zone !== 'Takeaway' &&
+      String(t.number) !== '99'
+    );
     const zone = this.selectedZone();
 
     const result = zone === 'ALL' 
@@ -55,23 +59,18 @@ export class FloorPlanComponent {
       event.stopImmediatePropagation();
     }
 
-    let takeawayTable = this.posService.tables().find(t => t.id === 'takeaway-counter');
-    if (!takeawayTable) {
-      takeawayTable = {
-        id: 'takeaway-counter',
-        number: '99',
-        tableNumber: '99',
-        name: '🛍️ Takeaway / Πακέτο',
-        seats: 1,
-        capacity: 1,
-        section: 'BAR',
-        zone: 'Takeaway',
-        status: 'FREE',
-        currentTotal: 0
-      };
-    }
     const slug = this.tenantContext.currentTenantId() || 'coffee-shop-demo';
-    this.router.navigate(['/t', slug, 'order', takeawayTable.id]);
+    const storeId = this.tenantContext.currentStoreId() || slug;
+
+    const takeawayTable = this.posService.tables().find(t =>
+      t.id === `${storeId}_takeaway-counter` ||
+      t.id.endsWith('takeaway-counter') ||
+      t.zone === 'Takeaway' ||
+      String(t.number) === '99'
+    );
+
+    const targetId = takeawayTable?.id || `${storeId}_takeaway-counter`;
+    this.router.navigate(['/t', slug, 'order', targetId]);
   }
 
   public handleManagerSettlement(tableId: string, method: 'CASH' | 'CARD', event?: Event): void {

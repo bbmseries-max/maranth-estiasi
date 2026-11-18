@@ -75,7 +75,7 @@ export class OrderTerminalComponent implements OnInit {
     return this.tenantContext.currentTenantId() || 'coffee-shop-demo';
   }
 
-  // Authoritative, Tenant-Scoped Active Table
+  // Authoritative, Tenant-Scoped Active Table (includes virtual Takeaway #99 counter)
   public activeTable = computed<RestaurantTable | null>(() => {
     const id = this.activeTableId();
     if (!id) return null;
@@ -84,13 +84,32 @@ export class OrderTerminalComponent implements OnInit {
     const currentStore = this.tenantContext.currentStoreId();
 
     const table = this.posService.tables().find(t => t.id === id);
-    if (!table) return null;
+    if (table) {
+      // Reject cross-tenant or cross-store table bindings
+      if (table.tenantId && table.tenantId !== currentTenant) return null;
+      if (table.storeId && table.storeId !== currentStore) return null;
+      return table as RestaurantTable;
+    }
 
-    // Reject cross-tenant or cross-store table bindings
-    if (table.tenantId && table.tenantId !== currentTenant) return null;
-    if (table.storeId && table.storeId !== currentStore) return null;
+    // Virtual Takeaway Counter (#99) — always available even if not persisted as a floor table
+    if (id === 'takeaway-counter') {
+      return {
+        id: 'takeaway-counter',
+        tenantId: currentTenant,
+        storeId: currentStore,
+        number: '99',
+        tableNumber: '99',
+        name: '🛍️ Takeaway / Πακέτο',
+        seats: 1,
+        capacity: 1,
+        section: 'BAR',
+        zone: 'Takeaway',
+        status: 'FREE',
+        currentTotal: 0
+      } as RestaurantTable;
+    }
 
-    return table as RestaurantTable;
+    return null;
   });
 
   // Transfer options strictly scoped to current tenant/store

@@ -400,7 +400,26 @@ export class TableOrderService {
   ): void {
     const { tenantId, storeId } = this.getActiveTenantAndStore();
 
-    const table = this.tables().find(t => t.id === tableId);
+    let table = this.tables().find(t => t.id === tableId);
+    const isVirtualTakeaway = !table && (tableId === 'takeaway-counter' || tableId.endsWith('takeaway-counter'));
+
+    if (isVirtualTakeaway) {
+      table = {
+        id: tableId,
+        tenantId,
+        storeId,
+        number: '99',
+        tableNumber: '99',
+        name: '🛍️ Takeaway / Πακέτο',
+        seats: 1,
+        capacity: 1,
+        section: 'TAKEAWAY',
+        zone: 'Takeaway',
+        status: 'FREE',
+        currentTotal: 0
+      };
+    }
+
     if (!table) {
       console.error('[TableOrderService] Table not found for tableId:', tableId);
       return;
@@ -495,7 +514,11 @@ export class TableOrderService {
       activeOrder: { ...existingOrder, items: updatedItems, subtotalNet, totalTax, grandTotal }
     };
 
-    const updatedTables = this.tables().map(t => t.id === table.id ? updatedT : t);
+    const existsInList = this.tables().some(t => t.id === table!.id);
+    const updatedTables = existsInList
+      ? this.tables().map(t => t.id === table!.id ? updatedT : t)
+      : [...this.tables(), updatedT];
+
     this.tables.set(updatedTables);
 
     if (this.db) {
