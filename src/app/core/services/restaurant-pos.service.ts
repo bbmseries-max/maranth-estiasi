@@ -918,40 +918,75 @@ export class RestaurantPosService {
     return this.tableOrderService.moveOrMergeTable(sourceTableId, targetTableId, this.currentEmployee());
   }
 
+  // Helper: Resolves the active vault for checkout (Personal -> Store Register -> Auto-Open)
+  private resolveTargetVaultForCheckout(
+    currentEmp: Employee,
+    targetWaiterVaultId?: string
+  ): WaiterVaultSession {
+    const activeVaults = this.activeVaultSessions().filter(v => v.status === 'OPEN');
+
+    // 1. Explicit vault ID passed
+    if (targetWaiterVaultId) {
+      const explicit = activeVaults.find(v => v.id === targetWaiterVaultId);
+      if (explicit) return explicit;
+    }
+
+    // 2. Employee's own active vault
+    const personalVault =
+      activeVaults.find(v => v.waiterId === currentEmp.id) ||
+      (this.activeVaultSession()?.status === 'OPEN' ? this.activeVaultSession() : null);
+    if (personalVault) return personalVault;
+
+    // 3. Store-wide active register fallback (e.g. Manager/Cashier opened the main till)
+    if (activeVaults.length > 0) {
+      return activeVaults[0];
+    }
+
+    // 4. Last resort: Auto-open a €0.00 vault so live checkout never deadlocks
+    this.openWaiterVault(0, currentEmp);
+    return this.activeVaultSession()!;
+  }
+
   // 1. Partial Item Settlement (Connected directly to Vault & Audit Log)
   public async settlePartialItems(
-    tableId: string, 
-    itemIdsToSettle: string[], 
+    tableId: string,
+    itemIdsToSettle: string[],
     method: 'CASH' | 'CARD'
   ): Promise<{ success: boolean; remainingTotal: number }> {
     const currentEmp = this.currentEmployee();
-    const activeVaults = this.activeVaultSessions();
-    const targetVault = activeVaults.find(v => v.waiterId === currentEmp?.id && v.status === 'OPEN') 
-                      || this.activeVaultSession();
+    if (!currentEmp) {
+      throw new Error('NO_ACTIVE_EMPLOYEE');
+    }
+
+    const targetVault = this.resolveTargetVaultForCheckout(currentEmp);
 
     return this.tableOrderService.settlePartialItems(
-      tableId, 
-      itemIdsToSettle, 
-      method, 
-      currentEmp, 
+      tableId,
+      itemIdsToSettle,
+      method,
+      currentEmp,
       async (sale: SaleRecord) => {
         const addedCash = method === 'CASH' ? (sale.grandTotal || 0) : 0;
         const addedCard = method === 'CARD' ? (sale.grandTotal || 0) : 0;
 
         if (this.db && targetVault) {
           try {
-            await updateDoc(doc(this.db, 'vaults', targetVault.id), {
-              cashCollected: increment(addedCash),
-              cardCollected: increment(addedCard)
-            });
+            await setDoc(
+              doc(this.db, 'vaults', targetVault.id),
+              {
+                cashCollected: increment(addedCash),
+                cardCollected: increment(addedCard)
+              },
+              { merge: true }
+            );
           } catch (e) {
             console.error('Error incrementing vault totals on partial payment:', e);
           }
         }
 
         this.logAudit(
-          'PARTIAL_PAYMENT_RECEIVED', 
-          `Μερική Είσπραξη €${sale.grandTotal.toFixed(2)} (${method}) - Τραπέζι #${sale.tableNumber}`, 
+          'PARTIAL_PAYMENT_RECEIVED',
+          `Μερική Είσπραξη €${sale.grandTotal.toFixed(2)} (${method}) - Τραπέζι #${sale.tableNumber}`,
           sale.tableNumber
         );
       }
@@ -960,7 +995,7 @@ export class RestaurantPosService {
 
   // 2. Full Table Settlement (Atomic Increment + Deductions)
   public async settleTablePayment(
-    tableId: string, 
+    tableId: string,
     paymentMethod: 'CASH' | 'CARD' | 'DEBT',
     targetWaiterVaultId?: string
   ): Promise<void> {
@@ -983,19 +1018,7 @@ export class RestaurantPosService {
       }
     }
 
-    const activeVaults = this.activeVaultSessions();
-    let targetVault: WaiterVaultSession | null = null;
-
-    if (targetWaiterVaultId) {
-      targetVault = activeVaults.find(v => v.id === targetWaiterVaultId && v.status === 'OPEN') || null;
-    } else {
-      targetVault = activeVaults.find(v => v.waiterId === currentEmp.id && v.status === 'OPEN') || this.activeVaultSession();
-    }
-
-    if (!targetVault) {
-      alert('⚠️ Δεν βρέθηκε ενεργό ανοιχτό ταμείο για τον υπάλληλο. Ανοίξτε ταμείο πριν την είσπραξη.');
-      return;
-    }
+    const targetVault = this.resolveTargetVaultForCheckout(currentEmp, targetWaiterVaultId);
 
     if (activeOrder && activeOrder.items) {
       activeOrder.items.forEach(orderItem => {
@@ -1010,20 +1033,24 @@ export class RestaurantPosService {
       const addedCash = paymentMethod === 'CASH' ? (sale.grandTotal || 0) : 0;
       const addedCard = paymentMethod === 'CARD' ? (sale.grandTotal || 0) : 0;
 
-      if (this.db) {
+      if (this.db && targetVault) {
         try {
-          await updateDoc(doc(this.db, 'vaults', targetVault!.id), {
-            cashCollected: increment(addedCash),
-            cardCollected: increment(addedCard)
-          });
+          await setDoc(
+            doc(this.db, 'vaults', targetVault.id),
+            {
+              cashCollected: increment(addedCash),
+              cardCollected: increment(addedCard)
+            },
+            { merge: true }
+          );
         } catch (e) {
           console.error('Error incrementing vault totals:', e);
         }
       }
 
       this.logAudit(
-        'PAYMENT_RECEIVED', 
-        `Εξόφληση €${sale.grandTotal.toFixed(2)} (${paymentMethod}) - Τραπέζι #${sale.tableNumber}`, 
+        'PAYMENT_RECEIVED',
+        `Εξόφληση €${sale.grandTotal.toFixed(2)} (${paymentMethod}) - Τραπέζι #${sale.tableNumber} [Ταμείο: ${targetVault.waiterName}]`,
         sale.tableNumber
       );
     });
