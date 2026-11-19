@@ -417,6 +417,13 @@ export class RestaurantPosService {
       this.allVaultSessions.set(vaultList);
 
       const activeOnly = vaultList.filter(v => v.status === 'OPEN');
+
+      // Keep optimistic local vault if Firestore snapshot arrived before setDoc finished writing
+      const localPending = this.activeVaultSession();
+      if (localPending && localPending.status === 'OPEN' && !activeOnly.some(v => v.id === localPending.id)) {
+        activeOnly.unshift(localPending);
+      }
+
       this.activeVaultSessions.set(activeOnly);
 
       const emp = this.currentEmployee();
@@ -455,9 +462,9 @@ export class RestaurantPosService {
     return emp;
   }
 
-  public setLoggedInEmployee(emp: Employee, customFloat: number = 0): void {
+  public async setLoggedInEmployee(emp: Employee, customFloat: number = 0): Promise<void> {
     this.tableOrderService.clearAllNotifications();
-    this.authShiftService.setLoggedInEmployee(emp);
+    await this.authShiftService.setLoggedInEmployee(emp);
 
     localStorage.setItem('current_employee', JSON.stringify(emp));
     if (emp.tenantId) localStorage.setItem('active_tenant_id', emp.tenantId);
@@ -466,15 +473,39 @@ export class RestaurantPosService {
     this.reconnectActiveStoreSync(emp);
     this.logAudit('CLOCK_IN', `Είσοδος στο σύστημα (${emp.name} - ${emp.role})`);
 
-    const existingVault = this.activeVaultSessions().find(
-      v => v.waiterId === emp.id && v.status === 'OPEN'
-    );
+    // Query Firestore directly for an OPEN vault for this employee before creating a new one
+    const tenantId = emp.tenantId || this.activeTenantId();
+    const storeId = emp.storeId || this.activeStoreId();
 
-    if (existingVault) {
-      this.activeVaultSession.set(existingVault);
-    } else {
-      this.openWaiterVault(customFloat, emp);
+    if (this.db) {
+      try {
+        const vQuery = query(
+          collection(this.db, 'vaults'),
+          where('tenantId', '==', tenantId),
+          where('storeId', '==', storeId),
+          where('waiterId', '==', emp.id),
+          where('status', '==', 'OPEN')
+        );
+        const vSnap = await getDocs(vQuery);
+        if (!vSnap.empty) {
+          const openVaults = vSnap.docs.map(d => ({ ...(d.data() as WaiterVaultSession), id: d.id }));
+          openVaults.sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
+          const primaryVault = openVaults[0];
+
+          this.activeVaultSession.set(primaryVault);
+          this.activeVaultSessions.update(list => [
+            primaryVault,
+            ...list.filter(v => v.id !== primaryVault.id && v.waiterId !== emp.id)
+          ]);
+          return;
+        }
+      } catch (err) {
+        console.warn('[Vault] Error checking existing open vault:', err);
+      }
     }
+
+    // No open vault exists in Firestore -> create and persist immediately
+    this.openWaiterVault(customFloat, emp);
   }
 
   public logoutEmployee(): void {

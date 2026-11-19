@@ -6,6 +6,7 @@ import {
   doc,
   setDoc,
   onSnapshot,
+  getDocs,
   query,
   where,
   Unsubscribe
@@ -76,7 +77,27 @@ export class AuthShiftService {
 
   public storeShifts = computed(() => {
     const targetStore = this.activeStoreId();
-    return this.workShifts().filter(s => !s.storeId || s.storeId === targetStore || s.storeId === 'all');
+    const scoped = this.workShifts().filter(
+      s => !s.storeId || s.storeId === targetStore || s.storeId === 'all'
+    );
+
+    // Deduplicate active WORKING shifts by employeeId (keep the latest)
+    const seenWorkingEmp = new Set<string>();
+    const result: WorkShiftLog[] = [];
+
+    const sorted = [...scoped].sort(
+      (a, b) => new Date(b.clockInTime).getTime() - new Date(a.clockInTime).getTime()
+    );
+
+    for (const shift of sorted) {
+      if (shift.status === 'WORKING') {
+        if (seenWorkingEmp.has(shift.employeeId)) continue;
+        seenWorkingEmp.add(shift.employeeId);
+      }
+      result.push(shift);
+    }
+
+    return result;
   });
 
   constructor() {
@@ -263,7 +284,7 @@ export class AuthShiftService {
     return null;
   }
 
-  public setLoggedInEmployee(emp: Employee): void {
+  public async setLoggedInEmployee(emp: Employee): Promise<void> {
     const activeTenant = this.tenantContext.currentTenantId();
 
     const scopedEmp: Employee = {
@@ -276,12 +297,51 @@ export class AuthShiftService {
     localStorage.setItem('current_employee', JSON.stringify(scopedEmp));
     localStorage.setItem('maranth_pos_employee', JSON.stringify(scopedEmp));
 
-    const existingShift = this.getEmployeeActiveShift(scopedEmp.id);
-    if (existingShift) {
-      this.activeWorkShift.set(existingShift);
-    } else {
-      this.clockInShift(`Σύνδεση χρήστη (${scopedEmp.name})`, scopedEmp);
+    // 1. Check in-memory first
+    const existingLocal = this.getEmployeeActiveShift(scopedEmp.id);
+    if (existingLocal) {
+      this.activeWorkShift.set(existingLocal);
+      return;
     }
+
+    // 2. Query Firestore directly before creating a shift (prevents duplicates on refresh/re-login)
+    if (this.db) {
+      try {
+        const q = query(
+          collection(this.db, 'shifts'),
+          where('tenantId', '==', activeTenant),
+          where('employeeId', '==', scopedEmp.id),
+          where('status', '==', 'WORKING')
+        );
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          const activeShifts = snap.docs.map(d => ({ ...(d.data() as WorkShiftLog), id: d.id }));
+          // Keep the newest shift and auto-close any accidental duplicates
+          activeShifts.sort((a, b) => new Date(b.clockInTime).getTime() - new Date(a.clockInTime).getTime());
+          const primaryShift = activeShifts[0];
+
+          for (let i = 1; i < activeShifts.length; i++) {
+            await setDoc(
+              doc(this.db, 'shifts', activeShifts[i].id),
+              { status: 'COMPLETED', clockOutTime: new Date().toISOString(), notes: 'Auto-closed duplicate shift' },
+              { merge: true }
+            ).catch(() => {});
+          }
+
+          this.activeWorkShift.set(primaryShift);
+          this.workShifts.update(list => {
+            const filtered = list.filter(s => !activeShifts.some(dup => dup.id === s.id));
+            return [primaryShift, ...filtered];
+          });
+          return;
+        }
+      } catch (err) {
+        console.warn('[AuthShift] Failed querying existing shifts:', err);
+      }
+    }
+
+    // 3. Only clock in if genuinely no WORKING shift exists
+    await this.clockInShift(`Σύνδεση χρήστη (${scopedEmp.name})`, scopedEmp);
   }
 
   public logoutEmployee(): void {
