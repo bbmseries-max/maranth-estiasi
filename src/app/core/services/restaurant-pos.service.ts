@@ -1,24 +1,23 @@
 // src/app/core/services/restaurant-pos.service.ts
 
-import { Injectable, signal, computed, inject, NgZone } from '@angular/core';
+import { Injectable, signal, computed, inject, NgZone, effect } from '@angular/core';
 import { Router } from '@angular/router';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { environment } from '../../../environments/environments';
-import { 
-  getFirestore, 
-  collection, 
-  doc, 
+import {
+  getFirestore,
+  collection,
+  doc,
   orderBy,
   limit,
-  setDoc, 
-  updateDoc,
+  setDoc,
   increment,
-  getDocs, 
-  deleteDoc, 
-  onSnapshot, 
-  query, 
-  where, 
-  Unsubscribe 
+  getDocs,
+  deleteDoc,
+  onSnapshot,
+  query,
+  where,
+  Unsubscribe
 } from 'firebase/firestore';
 
 import { InventoryService } from './inventory.service';
@@ -26,30 +25,20 @@ import { AuthShiftService } from './auth-shift.service';
 import { TableOrderService } from './table-order.service';
 import { TenantContextService } from './tenant-context.service';
 
-import { 
-  Employee, 
-  Role, 
-  Product, 
-  OrderModifier, 
-  Table, 
-  DailyZReportSnapshot, 
-  AuditLog, 
+import {
+  Employee,
+  Role,
+  Product,
+  OrderModifier,
+  Table,
+  DailyZReportSnapshot,
+  AuditLog,
   ModifierGroup,
-  WaiterVaultSession, 
-  SaleRecord, 
-  UnitOfMeasure, 
-  GreekVatRate, 
-  ItemPreparationStatus 
+  WaiterVaultSession,
+  SaleRecord,
+  UnitOfMeasure,
+  GreekVatRate
 } from '../modals';
-
-const DEFAULT_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCOgBK1uQ4f_7lufn7rzmXgseeR09YVcRQ",
-  authDomain: "maranth-hub.firebaseapp.com",
-  projectId: "maranth-hub",
-  storageBucket: "maranth-hub.firebasestorage.app",
-  messagingSenderId: "550516097634",
-  appId: "1:550516097634:web:7369f45595b3dce8f4873b"
-};
 
 function cleanUndefined(obj: any): any {
   if (obj === null || typeof obj !== 'object') return obj;
@@ -78,6 +67,7 @@ export class RestaurantPosService {
   private zReportsUnsub: Unsubscribe | null = null;
   private auditLogsUnsub: Unsubscribe | null = null;
   private isInitialVaultsSync = true;
+  private lastBoundScope = '';
 
   // Sub-Services Injection
   public inventoryService = inject(InventoryService);
@@ -143,7 +133,7 @@ export class RestaurantPosService {
     const currentStore = this.activeStoreId();
     let total = 0;
 
-    const storeTables = this.tables().filter(t => 
+    const storeTables = this.tables().filter(t =>
       (!t.tenantId || t.tenantId === currentTenant) &&
       (!t.storeId || t.storeId === currentStore)
     );
@@ -201,7 +191,6 @@ export class RestaurantPosService {
   public lastZReportTimestamp = computed<string | null>(() => {
     const list = this.zReports();
     if (list.length === 0) return null;
-    // zReports are already sorted desc by timestamp
     return list[0].timestamp || null;
   });
 
@@ -211,7 +200,7 @@ export class RestaurantPosService {
     const allSales = this.salesHistory();
 
     if (!lastZTime) {
-      return allSales; // First day of operation: all recorded sales
+      return allSales;
     }
 
     const lastZEpoch = new Date(lastZTime).getTime();
@@ -293,6 +282,16 @@ export class RestaurantPosService {
       this.tableOrderService.initFirestoreSync(this.db, () => this.currentEmployee());
       this.initVaultsSync();
       this.initFinancialListeners();
+
+      effect(() => {
+        const tenantId = this.activeTenantId();
+        const storeId = this.activeStoreId();
+        const scopeKey = `${tenantId}::${storeId}`;
+        if (this.db && tenantId && storeId && scopeKey !== this.lastBoundScope) {
+          this.lastBoundScope = scopeKey;
+          this.reconnectActiveStoreSync();
+        }
+      });
     } catch (e) {
       console.error('Firebase initialization error:', e);
     }
@@ -316,10 +315,15 @@ export class RestaurantPosService {
   }
 
   public getActiveTenantAndStore(): { tenantId: string; storeId: string } {
-    return {
-      tenantId: this.activeTenantId(),
-      storeId: this.activeStoreId()
-    };
+    const tenantId =
+      this.activeTenantId() ||
+      localStorage.getItem('active_tenant_id') ||
+      'coffee-shop-demo';
+    const storeId =
+      this.activeStoreId() ||
+      localStorage.getItem('active_store_id') ||
+      'store-1';
+    return { tenantId, storeId };
   }
 
   // Financial Listeners (Query-Scoped)
@@ -330,8 +334,7 @@ export class RestaurantPosService {
     if (this.zReportsUnsub) this.zReportsUnsub();
     if (this.auditLogsUnsub) this.auditLogsUnsub();
 
-    const tenantId = this.activeTenantId();
-    const storeId = this.activeStoreId();
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
 
     // 1. Scoped Sales
     const salesQuery = query(
@@ -391,8 +394,7 @@ export class RestaurantPosService {
       this.activeVaultsUnsub();
     }
 
-    const tenantId = this.activeTenantId();
-    const storeId = this.activeStoreId();
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
 
     const vaultsQuery = query(
       collection(this.db, 'vaults'),
@@ -419,7 +421,6 @@ export class RestaurantPosService {
 
       const activeOnly = vaultList.filter(v => v.status === 'OPEN');
 
-      // Keep optimistic local vault if Firestore snapshot arrived before setDoc finished writing
       const localPending = this.activeVaultSession();
       if (localPending && localPending.status === 'OPEN' && !activeOnly.some(v => v.id === localPending.id)) {
         activeOnly.unshift(localPending);
@@ -474,9 +475,7 @@ export class RestaurantPosService {
     this.reconnectActiveStoreSync(emp);
     this.logAudit('CLOCK_IN', `Είσοδος στο σύστημα (${emp.name} - ${emp.role})`);
 
-    // Query Firestore directly for an OPEN vault for this employee before creating a new one
-    const tenantId = emp.tenantId || this.activeTenantId();
-    const storeId = emp.storeId || this.activeStoreId();
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
 
     if (this.db) {
       try {
@@ -505,7 +504,6 @@ export class RestaurantPosService {
       }
     }
 
-    // No open vault exists in Firestore -> create and persist immediately
     this.openWaiterVault(customFloat, emp);
   }
 
@@ -567,8 +565,7 @@ export class RestaurantPosService {
     const emp = targetEmp || this.currentEmployee();
     if (!emp) return;
 
-    const tenantId = emp.tenantId || this.activeTenantId();
-    const storeId = emp.storeId || this.activeStoreId();
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
     const cleanFloat = Math.max(0, startingFloat);
 
     const existingOpenVault = this.activeVaultSessions().find(
@@ -582,8 +579,8 @@ export class RestaurantPosService {
 
     const vault: WaiterVaultSession = {
       id: `VAULT-${emp.id}-${Date.now()}`,
-      tenantId,
-      storeId,
+      tenantId: emp.tenantId || tenantId,
+      storeId: emp.storeId || storeId,
       shiftLogId: `SHIFT-${emp.id}-${Date.now()}`,
       waiterId: emp.id,
       waiterName: emp.name,
@@ -634,7 +631,7 @@ export class RestaurantPosService {
   public getEmployeeOpenVault(empIdOrPin: string): WaiterVaultSession | undefined {
     if (!empIdOrPin) return undefined;
     const target = String(empIdOrPin).trim().toLowerCase();
-    
+
     return this.activeVaultSessions().find(v => {
       if (v.status !== 'OPEN') return false;
       const vWaiterId = String(v.waiterId || '').toLowerCase();
@@ -677,7 +674,7 @@ export class RestaurantPosService {
     }
 
     await this.authShiftService.clockOutEmployeeShift(
-      closedSession.waiterId, 
+      closedSession.waiterId,
       `Κλείσιμο ταμείου (${closedSession.waiterName})`,
       {
         startingFloat: startFloat,
@@ -691,7 +688,7 @@ export class RestaurantPosService {
     );
 
     this.logAudit(
-      'VAULT_CLOSED', 
+      'VAULT_CLOSED',
       `Κλείσιμο ταμείου (${closedSession.waiterName}): Παράδοση €${handedOver.toFixed(2)}`
     );
 
@@ -752,7 +749,6 @@ export class RestaurantPosService {
   public async seedDefaultMenuForCurrentStore(): Promise<void> {
     const { tenantId, storeId } = this.getActiveTenantAndStore();
 
-    // 1. Categories
     const starterCategories = [
       { id: `${storeId}_cat_coffee`, name: 'Καφέδες & Ροφήματα', code: 'COFFEE', icon: '☕', order: 1, tenantId, storeId },
       { id: `${storeId}_cat_drinks`, name: 'Αναψυκτικά & Χυμοί', code: 'DRINKS', icon: '🥤', order: 2, tenantId, storeId },
@@ -760,7 +756,6 @@ export class RestaurantPosService {
       { id: `${storeId}_cat_bar`, name: 'Μπύρες & Ποτά', code: 'BAR', icon: '🍺', order: 4, tenantId, storeId }
     ];
 
-    // 2. Tenant-Scoped Modifier Groups (Matching your ModifierGroup & ModifierOption interfaces)
     const sweetnessGroupId = `${storeId}_modgrp_sweetness`;
     const milkGroupId = `${storeId}_modgrp_milk`;
     const coffeeExtrasGroupId = `${storeId}_modgrp_coffee_extras`;
@@ -853,11 +848,9 @@ export class RestaurantPosService {
       }
     ];
 
-    // Groups linked specifically to coffee and food products:
     const coffeeGroupIds = [sweetnessGroupId, milkGroupId, coffeeExtrasGroupId];
     const foodGroupIds = [breadGroupId, toastExtrasGroupId];
 
-    // 3. Products with explicit modifierGroupIds linkage
     const starterProducts: Product[] = [
       { id: `${storeId}_prod_1`, name: 'Espresso', price: 1.80, categoryId: `${storeId}_cat_coffee`, station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId, modifierGroupIds: coffeeGroupIds },
       { id: `${storeId}_prod_2`, name: 'Espresso Double', price: 2.20, categoryId: `${storeId}_cat_coffee`, station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId, modifierGroupIds: coffeeGroupIds },
@@ -873,7 +866,6 @@ export class RestaurantPosService {
       { id: `${storeId}_prod_12`, name: 'Νερό 500ml', price: 0.50, categoryId: `${storeId}_cat_drinks`, station: 'BAR', taxRate: 13, isActive: true, tenantId, storeId }
     ];
 
-    // 4. Update In-Memory Reactive State
     if ((this.inventoryService as any).categories?.set) {
       (this.inventoryService as any).categories.set(starterCategories);
     }
@@ -882,7 +874,6 @@ export class RestaurantPosService {
     }
     this.products.update(list => [...list.filter(p => p.storeId !== storeId), ...starterProducts]);
 
-    // 5. Persist to Firestore with Multi-Tenant Scoping
     if (this.db) {
       for (const cat of starterCategories) {
         await setDoc(doc(this.db, 'categories', cat.id), cleanUndefined(cat), { merge: true }).catch(() => {});
@@ -957,26 +948,57 @@ export class RestaurantPosService {
   ): WaiterVaultSession {
     const activeVaults = this.activeVaultSessions().filter(v => v.status === 'OPEN');
 
-    // 1. Explicit vault ID passed
     if (targetWaiterVaultId) {
       const explicit = activeVaults.find(v => v.id === targetWaiterVaultId);
       if (explicit) return explicit;
     }
 
-    // 2. Employee's own active vault
     const personalVault =
       activeVaults.find(v => v.waiterId === currentEmp.id) ||
       (this.activeVaultSession()?.status === 'OPEN' ? this.activeVaultSession() : null);
     if (personalVault) return personalVault;
 
-    // 3. Store-wide active register fallback (e.g. Manager/Cashier opened the main till)
     if (activeVaults.length > 0) {
       return activeVaults[0];
     }
 
-    // 4. Last resort: Auto-open a €0.00 vault so live checkout never deadlocks
     this.openWaiterVault(0, currentEmp);
     return this.activeVaultSession()!;
+  }
+
+  // Helper: Persist vault increment with guaranteed tenant/store scope
+  private async creditVaultAmount(
+    targetVault: WaiterVaultSession | null,
+    currentEmp: Employee,
+    method: 'CASH' | 'CARD' | 'DEBT',
+    amount: number
+  ): Promise<void> {
+    if (!this.db || !targetVault || amount <= 0) return;
+
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+    const addedCash = method === 'CASH' ? amount : 0;
+    const addedCard = method === 'CARD' ? amount : 0;
+
+    try {
+      await setDoc(
+        doc(this.db, 'vaults', targetVault.id),
+        {
+          id: targetVault.id,
+          tenantId: targetVault.tenantId || currentEmp.tenantId || tenantId,
+          storeId: targetVault.storeId || currentEmp.storeId || storeId,
+          waiterId: targetVault.waiterId || currentEmp.id,
+          waiterName: targetVault.waiterName || currentEmp.name,
+          status: 'OPEN',
+          openedAt: targetVault.openedAt || new Date().toISOString(),
+          startingFloat: targetVault.startingFloat ?? 0,
+          cashCollected: increment(addedCash),
+          cardCollected: increment(addedCard)
+        },
+        { merge: true }
+      );
+    } catch (e) {
+      console.error('Error incrementing vault totals:', e);
+    }
   }
 
   // 1. Partial Item Settlement (Connected directly to Vault & Audit Log)
@@ -998,23 +1020,7 @@ export class RestaurantPosService {
       method,
       currentEmp,
       async (sale: SaleRecord) => {
-        const addedCash = method === 'CASH' ? (sale.grandTotal || 0) : 0;
-        const addedCard = method === 'CARD' ? (sale.grandTotal || 0) : 0;
-
-        if (this.db && targetVault) {
-          try {
-            await setDoc(
-              doc(this.db, 'vaults', targetVault.id),
-              {
-                cashCollected: increment(addedCash),
-                cardCollected: increment(addedCard)
-              },
-              { merge: true }
-            );
-          } catch (e) {
-            console.error('Error incrementing vault totals on partial payment:', e);
-          }
-        }
+        await this.creditVaultAmount(targetVault, currentEmp, method, sale.grandTotal || 0);
 
         this.logAudit(
           'PARTIAL_PAYMENT_RECEIVED',
@@ -1055,17 +1061,15 @@ export class RestaurantPosService {
     const { tenantId, storeId } = this.getActiveTenantAndStore();
     const nowIso = new Date().toISOString();
 
-    // Calculate proportional net & VAT (default 13% F&B rate)
     const subtotalNet = Number((settledAmount / 1.13).toFixed(2));
     const totalTax = Number((settledAmount - subtotalNet).toFixed(2));
-
     const parsedTableNum = Number(table.number ?? table.tableNumber ?? 0);
 
     const saleRecord: SaleRecord = {
       id: `SALE-SPLIT-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      orderId: activeOrder.id || `ORDER-${Date.now()}`,
-      tenantId: currentEmp.tenantId || tenantId,
-      storeId: currentEmp.storeId || storeId,
+      orderId: activeOrder.orderId || `ORDER-${Date.now()}`,
+      tenantId: tenantId || currentEmp.tenantId,
+      storeId: storeId || currentEmp.storeId,
       tableId: table.id,
       tableNumber: Number.isFinite(parsedTableNum) ? parsedTableNum : 0,
       waiterId: currentEmp.id,
@@ -1080,25 +1084,11 @@ export class RestaurantPosService {
 
     try {
       if (this.db) {
-        // 1. Persist SaleRecord in /sales
         await setDoc(doc(this.db, 'sales', saleRecord.id), cleanUndefined(saleRecord));
-
-        // 2. Increment active vault totals
-        if (targetVault) {
-          await setDoc(
-            doc(this.db, 'vaults', targetVault.id),
-            {
-              cashCollected: increment(method === 'CASH' ? settledAmount : 0),
-              cardCollected: increment(method === 'CARD' ? settledAmount : 0)
-            },
-            { merge: true }
-          );
-        }
+        await this.creditVaultAmount(targetVault, currentEmp, method, settledAmount);
       }
 
-      // 3. Update or clear the table depending on remaining balance
       if (remainingTotal <= 0.01) {
-        // Deduct recipe ingredients on final closing share
         if (activeOrder.items) {
           activeOrder.items.forEach(orderItem => {
             const matchingProd = this.products().find(p => p.id === orderItem.productId);
@@ -1175,23 +1165,7 @@ export class RestaurantPosService {
     }
 
     return this.tableOrderService.settleTablePayment(tableId, paymentMethod, currentEmp, async (sale) => {
-      const addedCash = paymentMethod === 'CASH' ? (sale.grandTotal || 0) : 0;
-      const addedCard = paymentMethod === 'CARD' ? (sale.grandTotal || 0) : 0;
-
-      if (this.db && targetVault) {
-        try {
-          await setDoc(
-            doc(this.db, 'vaults', targetVault.id),
-            {
-              cashCollected: increment(addedCash),
-              cardCollected: increment(addedCard)
-            },
-            { merge: true }
-          );
-        } catch (e) {
-          console.error('Error incrementing vault totals:', e);
-        }
-      }
+      await this.creditVaultAmount(targetVault, currentEmp, paymentMethod, sale.grandTotal || 0);
 
       this.logAudit(
         'PAYMENT_RECEIVED',
@@ -1214,7 +1188,6 @@ export class RestaurantPosService {
     const nowIso = new Date().toISOString();
     const dateDisplay = new Date().toLocaleDateString('el-GR');
 
-    // Aggregate cash and card strictly from the current business window
     const totalCash = activeWindow.reduce(
       (sum, s) => sum + (s.paymentMethod === 'CASH' ? (s.grandTotal || 0) : 0),
       0
@@ -1224,7 +1197,6 @@ export class RestaurantPosService {
       0
     );
 
-    // AADE myDATA 11.1 (ΑΛΠ - Counter/Takeaway Goods) vs 11.2 (ΑΠΥ - Dine-In Table Service)
     let alp11_1Total = 0;
     let alp11_1Count = 0;
     let apy11_2Total = 0;
@@ -1288,7 +1260,7 @@ export class RestaurantPosService {
     );
 
     return snapshot;
-    }
+  }
 
   // Safe Guarded Reset
   public async resetDatabaseToDefaults(): Promise<void> {
