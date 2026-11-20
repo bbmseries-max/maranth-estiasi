@@ -7,8 +7,6 @@ import { tenantExistsGuard } from './core/guards/tenant.guard';
 
 export const routes: Routes = [
   // 1. Root redirect defaults to demo tenant
-  
-  
   { 
     path: '', 
     pathMatch: 'full',
@@ -16,6 +14,11 @@ export const routes: Routes = [
   },
 
   // 2. Tenant Direct Routes (No nested router-outlet required)
+  {
+    path: 't/:tenantSlug',
+    pathMatch: 'full',
+    redirectTo: 't/:tenantSlug/login'
+  },
   {
     path: 't/:tenantSlug/login',
     canActivate: [tenantExistsGuard],
