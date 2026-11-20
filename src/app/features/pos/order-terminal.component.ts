@@ -1,3 +1,5 @@
+// src/app/features/pos/order-terminal.component.ts
+
 import { Component, inject, signal, NgZone, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -6,6 +8,7 @@ import { RestaurantPosService } from '../../core/services/restaurant-pos.service
 import { ThermalPrinterService } from '../../core/services/thermal-printer.service';
 import { TenantContextService } from '../../core/services/tenant-context.service';
 import { ConnectionStatusService } from '../../core/services/connection-status.service';
+import { InvoiceBridgeService } from '../../core/services/invoice-bridge.service';
 import { 
   RestaurantTable, 
   TableOrderItem, 
@@ -33,6 +36,7 @@ export class OrderTerminalComponent implements OnInit {
   public tenantContext = inject(TenantContextService);
   public posService = inject(RestaurantPosService);
   private connectionService = inject(ConnectionStatusService);
+  private invoiceBridge = inject(InvoiceBridgeService);
 
   public Math = Math;
 
@@ -58,6 +62,10 @@ export class OrderTerminalComponent implements OnInit {
   public splitMode = signal<'ITEMS' | 'EQUAL'>('ITEMS');
   public selectedItemIdsForSplit = signal<string[]>([]);
   public equalSplitParts = signal<number>(2);
+
+  // B2B Invoice Confirmation Modal Signals
+  public showB2BConfirmModal = signal<boolean>(false);
+  public b2bPaymentMethod = signal<'CASH' | 'CARD'>('CARD');
 
   // Reactive Computed Signals
   public categories = computed(() => this.posService.categories());
@@ -85,13 +93,11 @@ export class OrderTerminalComponent implements OnInit {
 
     const table = this.posService.tables().find(t => t.id === id);
     if (table) {
-      // Reject cross-tenant or cross-store table bindings
       if (table.tenantId && table.tenantId !== currentTenant) return null;
       if (table.storeId && table.storeId !== currentStore) return null;
       return table as RestaurantTable;
     }
 
-    // Virtual Takeaway Counter (#99) — always available even if not persisted as a floor table
     if (id === 'takeaway-counter') {
       return {
         id: 'takeaway-counter',
@@ -182,7 +188,6 @@ export class OrderTerminalComponent implements OnInit {
     return Number(total.toFixed(2));
   });
 
-  // Fallback defaults for legacy items lacking explicit group links
   private defaultCoffeeModifiers: ModifierGroup[] = [
     {
       id: 'grp_sweetness',
@@ -296,11 +301,10 @@ export class OrderTerminalComponent implements OnInit {
     return this.getModifierGroupsForProduct(prod);
   });
 
- ngOnInit(): void {
+  ngOnInit(): void {
     const slug = this.tenantContext.currentTenantId() || 'coffee-shop-demo';
     const tableId = this.route.snapshot.paramMap.get('tableId');
 
-    // 1. If no tableId in URL, safely route back to floor-plan
     if (!tableId) {
       this.router.navigate(['/t', slug, 'floor-plan'], { replaceUrl: true });
       return;
@@ -308,7 +312,6 @@ export class OrderTerminalComponent implements OnInit {
 
     this.activeTableId.set(tableId);
 
-    // 2. Validate table ownership if tables are already loaded in memory
     const tablesList = this.posService.tables();
     if (tablesList.length > 0) {
       const currentTable = this.activeTable();
@@ -416,7 +419,6 @@ export class OrderTerminalComponent implements OnInit {
     const tableId = this.activeTableId();
     if (!tableId || this.isProcessing()) return;
 
-    // 🛡️ Guard against offline kitchen dispatch
     if (!this.connectionService.isOnline()) {
       alert('⛔ Αδυναμία αποστολής: Η συσκευή είναι εκτός σύνδεσης (Offline). Ελέγξτε το Wi-Fi.');
       return;
@@ -477,11 +479,74 @@ export class OrderTerminalComponent implements OnInit {
     this.isProcessing.set(true);
     try {
       await this.posService.settleTablePayment(tableId, method);
-      // ✅ MUST use tenant slug
       this.router.navigate(['/t', this.currentSlug(), 'floor-plan'], { replaceUrl: true });
     } catch (err) {
       console.error('Payment error:', err);
       alert('Σφάλμα κατά την ολοκλήρωση της πληρωμής.');
+    } finally {
+      this.isProcessing.set(false);
+    }
+  }
+
+  // --- 🧾 B2B INVOICE (TIMOLOGIO BRIDGE) ACTIONS ---
+  public openB2BConfirmModal(): void {
+    if (this.isProcessing()) return;
+
+    if (this.hasPendingItems()) {
+      alert('⛔ Παρακαλώ πατήστε πρώτα "Αποστολή" στην κουζίνα πριν την έκδοση Τιμολογίου!');
+      return;
+    }
+
+    const table = this.activeTable();
+    const activeItems = (table?.activeOrder?.items || []).filter(i => i.status !== 'VOIDED');
+    if (activeItems.length === 0) {
+      alert('⚠️ Δεν υπάρχουν ενεργά προϊόντα στο τραπέζι για έκδοση Τιμολογίου.');
+      return;
+    }
+
+    this.b2bPaymentMethod.set('CARD');
+    this.showB2BConfirmModal.set(true);
+  }
+
+  public closeB2BConfirmModal(): void {
+    if (this.isProcessing()) return;
+    this.showB2BConfirmModal.set(false);
+  }
+
+  public async confirmAndSendB2BInvoice(): Promise<void> {
+    const tableId = this.activeTableId();
+    const table = this.activeTable();
+    if (!tableId || !table || this.isProcessing()) return;
+
+    const activeItems = (table.activeOrder?.items || []).filter(i => i.status !== 'VOIDED');
+    if (activeItems.length === 0) return;
+
+    this.isProcessing.set(true);
+    try {
+      const paymentMethod = this.b2bPaymentMethod();
+      const rawItems = activeItems.map((item) => ({
+        name: item.productName,
+        quantity: Number(item.quantity || 1),
+        price: Number(item.finalItemPrice || 0),
+        vatRate: Number((item as any).taxRate ?? 13)
+      }));
+
+      // 1. Settle table in POS (updates shift drawer & closes table)
+      await this.posService.settleTablePayment(tableId, paymentMethod);
+
+      // 2. Push handoff payload to Firestore & launch Maranth Timologio pre-filled
+      await this.invoiceBridge.launchB2BInvoice({
+        saleId: table.activeOrder?.id || `sale_${Date.now()}`,
+        tableLabel: table.name || `Τραπέζι #${table.number || table.tableNumber || '?'}`,
+        paymentMethod,
+        rawItems
+      });
+
+      this.showB2BConfirmModal.set(false);
+      this.router.navigate(['/t', this.currentSlug(), 'floor-plan'], { replaceUrl: true });
+    } catch (err) {
+      console.error('[B2B Invoice Handoff] Failed:', err);
+      alert('Σφάλμα κατά την αποστολή στο Maranth Timologio.');
     } finally {
       this.isProcessing.set(false);
     }
@@ -529,7 +594,6 @@ export class OrderTerminalComponent implements OnInit {
       const res = await this.posService.moveOrMergeTable(sourceId, targetId);
       if (res?.success) {
         this.activeTableId.set(targetId);
-        // ✅ MUST use tenant slug and 'order'
         await this.router.navigate(['/t', this.currentSlug(), 'order', targetId], { replaceUrl: true });
       } else {
         alert('Η μεταφορά του τραπεζιού απέτυχε.');
@@ -554,7 +618,6 @@ export class OrderTerminalComponent implements OnInit {
         this.selectedItemIdsForSplit.set([]);
         this.showSplitBillModal.set(false);
         if (res.remainingTotal === 0) {
-          // ✅ MUST use tenant slug
           this.router.navigate(['/t', this.currentSlug(), 'floor-plan'], { replaceUrl: true });
         }
       } else {
