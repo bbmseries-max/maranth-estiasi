@@ -780,15 +780,16 @@ export class TableOrderService {
 
         const grandTotal = Number(tableData.activeOrder.grandTotal || tableData.currentTotal || 0);
         const tableIdentifier = tableData.number ?? tableData.tableNumber ?? '1';
+        const fiscalMeta = this.resolveMyDataFiscalClassification(tableData);
 
-        // Prepare immutable sale record
+        // Prepare immutable sale record with guaranteed active tenantId & storeId
         finalizedSaleRecord = {
           id: `SALE-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          tenantId: waiter.tenantId || tableData.tenantId || tenantId,
-          storeId: waiter.storeId || tableData.storeId || storeId,
+          tenantId: tenantId || tableData.tenantId || waiter.tenantId,
+          storeId: storeId || tableData.storeId || waiter.storeId,
           orderId: tableData.activeOrder.orderId || `ORD-${Date.now()}`,
           tableId: tableData.id,
-          tableNumber: tableIdentifier as any,
+          tableNumber: Number(tableIdentifier) || 0,
           waiterId: waiter.id,
           waiterName: waiter.name,
           paymentMethod,
@@ -796,8 +797,9 @@ export class TableOrderService {
           subtotalNet: Number((tableData.activeOrder.subtotalNet || (grandTotal / 1.13)).toFixed(2)),
           totalTax: Number((tableData.activeOrder.totalTax || (grandTotal - (grandTotal / 1.13))).toFixed(2)),
           grandTotal,
-          timestamp: new Date().toISOString()
-        };
+          timestamp: new Date().toISOString(),
+          ...fiscalMeta
+        } as SaleRecord;
 
         const saleRef = doc(this.db!, 'sales', finalizedSaleRecord.id);
         transaction.set(saleRef, safeFirestorePayload(finalizedSaleRecord));
@@ -1012,13 +1014,15 @@ export class TableOrderService {
     const tableIdentifier = table.number ?? table.tableNumber ?? '1';
 
     // 2. Generate an authoritative SaleRecord for the settled partition
+    const fiscalMeta = this.resolveMyDataFiscalClassification(table);
+
     const partialSaleRecord: SaleRecord = {
       id: `SALE-PARTIAL-${Date.now()}`,
-      tenantId: currentEmp?.tenantId || table.tenantId || tenantId,
-      storeId: currentEmp?.storeId || table.storeId || storeId,
+      tenantId: tenantId || table.tenantId || currentEmp?.tenantId || '',
+      storeId: storeId || table.storeId || currentEmp?.storeId || '',
       orderId: table.activeOrder.orderId,
       tableId: table.id,
-      tableNumber: tableIdentifier as any,
+      tableNumber: Number(tableIdentifier) || 0,
       waiterId: currentEmp?.id || 'EMP-SYSTEM',
       waiterName: currentEmp?.name || 'Σερβιτόρος',
       paymentMethod: method,
@@ -1026,8 +1030,9 @@ export class TableOrderService {
       subtotalNet: paidSubtotalNet,
       totalTax: paidTotalTax,
       grandTotal: paidGrandTotal,
-      timestamp: new Date().toISOString()
-    };
+      timestamp: new Date().toISOString(),
+      ...fiscalMeta
+    } as SaleRecord;
 
     if (this.db) {
       try {

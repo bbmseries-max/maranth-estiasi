@@ -2,7 +2,8 @@
 
 import { Injectable, signal, computed, inject, NgZone } from '@angular/core';
 import { Router } from '@angular/router';
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { environment } from '../../../environments/environments';
 import { 
   getFirestore, 
   collection, 
@@ -284,7 +285,7 @@ export class RestaurantPosService {
 
   constructor() {
     try {
-      const app = initializeApp(DEFAULT_FIREBASE_CONFIG);
+      const app = getApps().length > 0 ? getApp() : initializeApp(environment.firebase);
       this.db = getFirestore(app);
 
       this.inventoryService.initFirestoreSync(this.db);
@@ -1022,6 +1023,119 @@ export class RestaurantPosService {
         );
       }
     );
+  }
+
+  // 1b. Equal Split Amount Settlement (Connected directly to Vault, Sales & Table Balance)
+  public async settleEqualSplitAmount(
+    tableId: string,
+    amountToSettle: number,
+    method: 'CASH' | 'CARD'
+  ): Promise<{ success: boolean; remainingTotal: number }> {
+    const currentEmp = this.currentEmployee();
+    if (!currentEmp) {
+      alert('⚠️ Δεν υπάρχει συνδεδεμένος χρήστης. Παρακαλώ συνδεθείτε.');
+      this.logoutEmployee();
+      return { success: false, remainingTotal: 0 };
+    }
+
+    const table = this.tables().find(t => t.id === tableId);
+    const activeOrder = table?.activeOrder;
+    if (!table || !activeOrder) {
+      return { success: false, remainingTotal: 0 };
+    }
+
+    const currentTotal = Number(activeOrder.grandTotal ?? table.currentTotal ?? 0);
+    const settledAmount = Number(Math.min(currentTotal, Math.max(0, amountToSettle)).toFixed(2));
+    if (settledAmount <= 0) {
+      return { success: false, remainingTotal: currentTotal };
+    }
+
+    const remainingTotal = Number(Math.max(0, currentTotal - settledAmount).toFixed(2));
+    const targetVault = this.resolveTargetVaultForCheckout(currentEmp);
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+    const nowIso = new Date().toISOString();
+
+    // Calculate proportional net & VAT (default 13% F&B rate)
+    const subtotalNet = Number((settledAmount / 1.13).toFixed(2));
+    const totalTax = Number((settledAmount - subtotalNet).toFixed(2));
+
+    const parsedTableNum = Number(table.number ?? table.tableNumber ?? 0);
+
+    const saleRecord: SaleRecord = {
+      id: `SALE-SPLIT-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      orderId: activeOrder.id || `ORDER-${Date.now()}`,
+      tenantId: currentEmp.tenantId || tenantId,
+      storeId: currentEmp.storeId || storeId,
+      tableId: table.id,
+      tableNumber: Number.isFinite(parsedTableNum) ? parsedTableNum : 0,
+      waiterId: currentEmp.id,
+      waiterName: currentEmp.name,
+      paymentMethod: method,
+      subtotalNet,
+      totalTax,
+      grandTotal: settledAmount,
+      timestamp: nowIso,
+      items: (activeOrder.items || []).filter(i => i.status !== 'VOIDED')
+    };
+
+    try {
+      if (this.db) {
+        // 1. Persist SaleRecord in /sales
+        await setDoc(doc(this.db, 'sales', saleRecord.id), cleanUndefined(saleRecord));
+
+        // 2. Increment active vault totals
+        if (targetVault) {
+          await setDoc(
+            doc(this.db, 'vaults', targetVault.id),
+            {
+              cashCollected: increment(method === 'CASH' ? settledAmount : 0),
+              cardCollected: increment(method === 'CARD' ? settledAmount : 0)
+            },
+            { merge: true }
+          );
+        }
+      }
+
+      // 3. Update or clear the table depending on remaining balance
+      if (remainingTotal <= 0.01) {
+        // Deduct recipe ingredients on final closing share
+        if (activeOrder.items) {
+          activeOrder.items.forEach(orderItem => {
+            const matchingProd = this.products().find(p => p.id === orderItem.productId);
+            if (matchingProd) {
+              this.deductRecipeIngredients(matchingProd, orderItem.quantity);
+            }
+          });
+        }
+
+        await this.tableOrderService.updateTable(tableId, {
+          status: 'FREE',
+          currentTotal: 0,
+          activeOrder: undefined
+        });
+      } else {
+        await this.tableOrderService.updateTable(tableId, {
+          currentTotal: remainingTotal,
+          activeOrder: {
+            ...activeOrder,
+            grandTotal: remainingTotal,
+            subtotalNet: Number((remainingTotal / 1.13).toFixed(2)),
+            totalTax: Number((remainingTotal - remainingTotal / 1.13).toFixed(2))
+          }
+        });
+      }
+
+      this.logAudit(
+        'EQUAL_SPLIT_PAYMENT',
+        `Εξόφληση Μεριδίου €${settledAmount.toFixed(2)} (${method}) - Τραπέζι #${saleRecord.tableNumber} (Υπόλοιπο: €${remainingTotal.toFixed(2)})`,
+        saleRecord.tableNumber
+      );
+
+      return { success: true, remainingTotal };
+    } catch (err) {
+      console.error('Error settling equal split share:', err);
+      return { success: false, remainingTotal: currentTotal };
+    }
   }
 
   // 2. Full Table Settlement (Atomic Increment + Deductions)

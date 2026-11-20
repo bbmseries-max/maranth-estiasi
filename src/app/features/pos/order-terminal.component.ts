@@ -568,6 +568,37 @@ export class OrderTerminalComponent implements OnInit {
     }
   }
 
+  public equalSplitPerPersonAmount = computed<number>(() => {
+    const table = this.activeTable();
+    const total = Number(table?.activeOrder?.grandTotal || table?.currentTotal || 0);
+    const parts = Math.max(2, this.equalSplitParts());
+    return Number((total / parts).toFixed(2));
+  });
+
+  public async settleEqualSplitPart(method: 'CASH' | 'CARD'): Promise<void> {
+    const tableId = this.activeTableId();
+    const amount = this.equalSplitPerPersonAmount();
+    if (!tableId || amount <= 0 || this.isProcessing()) return;
+
+    this.isProcessing.set(true);
+    try {
+      const res = await this.posService.settleEqualSplitAmount(tableId, amount, method);
+      if (res?.success) {
+        if (res.remainingTotal <= 0.01) {
+          this.showSplitBillModal.set(false);
+          this.router.navigate(['/t', this.currentSlug(), 'floor-plan'], { replaceUrl: true });
+        }
+      } else {
+        alert('Σφάλμα κατά την πληρωμή μεριδίου.');
+      }
+    } catch (err) {
+      console.error('Equal split settlement error:', err);
+      alert('Σφάλμα κατά την πληρωμή μεριδίου.');
+    } finally {
+      this.isProcessing.set(false);
+    }
+  }
+
   // --- ➗ SPLIT ACTIONS ---
   public openSplitModal(): void {
     this.selectedItemIdsForSplit.set([]);
