@@ -864,6 +864,63 @@ export class TableOrderService {
     }
   }
 
+  public async clearTableWithoutSale(tableId: string): Promise<void> {
+    if (!tableId) return;
+
+    const { tenantId, storeId } = this.getActiveTenantAndStore();
+    const table = this.tables().find(t => t.id === tableId);
+    const tableIdentifier = table?.number ?? table?.tableNumber ?? (tableId.includes('takeaway') ? '99' : '1');
+
+    const cleanFreedTable = {
+      id: tableId,
+      number: tableIdentifier,
+      tableNumber: tableIdentifier,
+      name: table?.name || (tableId.includes('takeaway') ? '🛍️ Takeaway / Πακέτο' : `Τραπέζι ${tableIdentifier}`),
+      seats: table?.seats || table?.capacity || 4,
+      capacity: table?.seats || table?.capacity || 4,
+      section: table?.section || (tableId.includes('takeaway') ? 'TAKEAWAY' : 'INDOOR'),
+      zone: table?.zone || (tableId.includes('takeaway') ? 'Takeaway' : 'Σάλα'),
+      tenantId: table?.tenantId || tenantId,
+      storeId: table?.storeId || storeId,
+      status: 'FREE' as const,
+      currentTotal: 0,
+      activeOrder: null,
+      activeOrderId: null,
+      waiterId: null,
+      waiterName: null,
+      assignedWaiterId: null,
+      assignedWaiterName: null,
+      reservation: null
+    };
+
+    this.tables.update(list =>
+      list.map(t =>
+        t.id === tableId
+          ? ({
+              ...t,
+              status: 'FREE',
+              currentTotal: 0,
+              activeOrder: undefined,
+              activeOrderId: undefined,
+              waiterId: undefined,
+              waiterName: undefined,
+              assignedWaiterId: undefined,
+              assignedWaiterName: undefined,
+              reservation: undefined
+            } as Table)
+          : t
+      )
+    );
+
+    if (this.db && tableId !== 'takeaway-counter') {
+      try {
+        await setDoc(doc(this.db, 'tables', tableId), cleanFreedTable);
+      } catch (err) {
+        console.error('[TableOrderService] Error clearing table after B2B invoice handoff:', err);
+      }
+    }
+  }
+
   public async reserveTable(tableId: string, info: TableReservationInfo): Promise<void> {
     const table = this.tables().find(t => t.id === tableId);
     if (!table) return;

@@ -531,16 +531,16 @@ export class OrderTerminalComponent implements OnInit {
         vatRate: Number((item as any).taxRate ?? 13)
       }));
 
-      // 1. Settle table in POS (updates shift drawer & closes table)
-      await this.posService.settleTablePayment(tableId, paymentMethod);
-
-      // 2. Push handoff payload to Firestore & launch Maranth Timologio pre-filled
+      // 1. Launch Maranth Timologio pre-filled with the B2B invoice items
       await this.invoiceBridge.launchB2BInvoice({
-        saleId: table.activeOrder?.id || `sale_${Date.now()}`,
+        saleId: table.activeOrder?.id || `b2b_${Date.now()}`,
         tableLabel: table.name || `Τραπέζι #${table.number || table.tableNumber || '?'}`,
         paymentMethod,
         rawItems
       });
+
+      // 2. Deduct stock, log audit, and free the table via posService (no B2C Z-Report entry)
+      await this.posService.clearTableForB2BInvoice(tableId);
 
       this.showB2BConfirmModal.set(false);
       this.router.navigate(['/t', this.currentSlug(), 'floor-plan'], { replaceUrl: true });

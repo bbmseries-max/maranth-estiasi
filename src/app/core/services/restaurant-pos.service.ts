@@ -1175,6 +1175,40 @@ export class RestaurantPosService {
     });
   }
 
+  public async clearTableForB2BInvoice(tableId: string): Promise<void> {
+    const currentEmp = this.currentEmployee();
+    if (!currentEmp) {
+      alert('⚠️ Δεν υπάρχει συνδεδεμένος χρήστης. Παρακαλώ συνδεθείτε.');
+      this.logoutEmployee();
+      return;
+    }
+
+    const table = this.tables().find(t => t.id === tableId);
+    const activeOrder = table?.activeOrder;
+
+    // 1. Deduct stock/recipe ingredients since the items were served
+    if (activeOrder?.items) {
+      activeOrder.items
+        .filter(item => item.status !== 'VOIDED')
+        .forEach(orderItem => {
+          const matchingProd = this.products().find(p => p.id === orderItem.productId);
+          if (matchingProd) {
+            this.deductRecipeIngredients(matchingProd, orderItem.quantity);
+          }
+        });
+    }
+
+    // 2. Delegate table reset to tableOrderService (no B2C sale / no Z-Report entry)
+    await this.tableOrderService.clearTableWithoutSale(tableId);
+
+    // 3. Record audit trail
+    this.logAudit(
+      'B2B_INVOICE_HANDOFF',
+      `Αποστολή στο Maranth Timologio (B2B) €${Number(activeOrder?.grandTotal || table?.currentTotal || 0).toFixed(2)} - Τραπέζι #${table?.number || table?.tableNumber || tableId}`,
+      Number(table?.number || table?.tableNumber || 0)
+    );
+  }
+
   public closeDayAndGenerateZReport(): DailyZReportSnapshot & {
     alp11_1Total?: number;
     apy11_2Total?: number;
